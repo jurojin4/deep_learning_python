@@ -5,10 +5,6 @@ learning** using Python as the programming language. However my goal, as future
 AI engineer/AI researcher, is to use or develop mathematical tools in order
 to provide solid explanations in this field, where many results are empirical.
 
-My Vision of Artificial Intelligence align with the logic of this paper: 
-**<u><a href="https://arxiv.org/pdf/1709.02540">The Expressive Power of Neural Networks: A View from the Width</a></u>**.
-
-
 ## Installation with Conda
 ```
 git clone https://github.com/jurojin4/deep-learning-python.git

@@ -1,6 +1,12 @@
 # Change Log
 All notable changes to this repository will be documented in this file.
 
+## 2026-03-02 YOLOV3 Implementation
+
+### Added
+- YOLOV3 implementation
+- Realtime computer vision for YOLOV1 and YOLOV3
+
 ## 2026-02-06 - Reorganization
 
 ### Added

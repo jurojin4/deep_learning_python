@@ -164,12 +164,12 @@ def prepare_vocdetection(path: str, year: Literal["2007", "2012"] = "2007", box_
     :rtype: Union[Tuple[Dict[str, Dict[str, np.ndarray]], Dict[str, Dict[str, Union[List[int], List[List[int]]]]], Dict[str, Dict[str, Union[int, List[int]]]], List[float], int, Dict[str, int], Literal['pascalvoc2007'], Literal['object_detection']], Tuple[Dict[str, Dict[str, np.ndarray]], Dict[str, Dict[str, Union[List[int], List[List[int]]]]], Dict[str, Dict[str, Union[int, List[int]]]], List[float], int, Dict[str, int], Literal['pascalvoc2012'], Literal['object_detection']]]
     """
     assert year in ["2007", "2012"], f"year has to be in [\"2007\", \"2012\"]."
-    assert box_format in ["xyxy", "xywh", "xcycwh"], f"year has to be in [\"xyxy\", \"xywh\", \"xcycwh\"]."
+    assert box_format in ["xyxy", "xywh", "xcycwh"], f"box_format has to be in [\"xyxy\", \"xywh\", \"xcycwh\"]."
 
     if year == "2007":
-        with open(os.path.join(path, "pascal_voc2007/pascal_voc/pascal_train2007.json"), "r") as file:
+        with open(os.path.join(path, "pascalvoc2007/pascal_voc/pascal_train2007.json"), "r") as file:
             train_data = json.load(file)
-        with open(os.path.join(path, "pascal_voc2007/pascal_voc/pascal_val2007.json"), "r") as file:
+        with open(os.path.join(path, "pascalvoc2007/pascal_voc/pascal_val2007.json"), "r") as file:
             val_data = json.load(file)
 
         categories = dict([(c["name"], c["id"]) for c in train_data["categories"]])
@@ -199,7 +199,7 @@ def prepare_vocdetection(path: str, year: Literal["2007", "2012"] = "2007", box_
                 if update_weights:
                     weights[annotation_data["category_id"]-1] += 1
 
-            images_path = os.path.join(path, "pascal_voc2007/voctrainval_06-nov-2007/VOCdevkit/VOC2007/JPEGImages/")
+            images_path = os.path.join(path, "pascalvoc2007/voctrainval_06-nov-2007/VOCdevkit/VOC2007/JPEGImages/")
             for img_id in bboxes:
                 n = len(str(img_id))
                 file = f"{"0" * (6 - n)}{img_id}.jpg"
@@ -217,9 +217,9 @@ def prepare_vocdetection(path: str, year: Literal["2007", "2012"] = "2007", box_
             return {"images": images, "bboxes": bboxes, "labels": labels}
         return _treatment_2007(train_data), _treatment_2007(val_data, False), weights, len(categories), categories, f"pascalvoc{year}", "object_detection"
     else:
-        with open(os.path.join(path, "VOC2012/ImageSets/Main/train.txt"), "r") as file:
+        with open(os.path.join(path, "pascalvoc2012/ImageSets/Main/train.txt"), "r") as file:
             train_data = file.readlines()
-        with open(os.path.join(path, "VOC2012/ImageSets/Main/val.txt"), "r") as file:
+        with open(os.path.join(path, "pascalvoc2012/ImageSets/Main/val.txt"), "r") as file:
             val_data = file.readlines()
 
         train_data = [file.replace("\n", "") for file in train_data]
@@ -232,9 +232,9 @@ def prepare_vocdetection(path: str, year: Literal["2007", "2012"] = "2007", box_
             bboxes = {}
             labels = {}
             
-            for file in tqdm(os.listdir(os.path.join(path, "VOC2012/Annotations/")), leave=True):
+            for file in tqdm(os.listdir(os.path.join(path, "pascalvoc2012/Annotations/")), leave=True):
                 if file.split(".")[0] in data:
-                    tree = ET.parse(os.path.join(path, "VOC2012/Annotations", file))
+                    tree = ET.parse(os.path.join(path, "pascalvoc2012/Annotations", file))
                     root = tree.getroot()
 
                     width = int(root.find("size/width").text)
@@ -271,13 +271,13 @@ def prepare_vocdetection(path: str, year: Literal["2007", "2012"] = "2007", box_
                         if update_weights:
                             weights[categories[label]] += 1
 
-                    image = np.array(Image.open(os.path.join(path, "VOC2012/JPEGImages", f"{file.split(".")[0]}.jpg")))
+                    image = np.array(Image.open(os.path.join(path, "pascalvoc2012/JPEGImages", f"{file.split(".")[0]}.jpg")))
                     images[id] = image
             return {"images": images, "bboxes": bboxes, "labels": labels}
 
         return _treatment_2012(train_data), _treatment_2012(val_data, False), weights, len(categories), categories, f"pascalvoc{year}", "object_detection"
 
-def prepare_face_detection(path: str, size: Union[int, Tuple[int, int]], box_format: Literal["xyxy", "xywh", "xcycwh"] = "xywh") -> Union[Tuple[Dict[str, Dict[str, np.ndarray]], Dict[str, Dict[str, Union[List[int], List[List[int]]]]], Dict[str, Dict[str, Union[int, List[int]]]], List[float], int, Dict[str, int], Literal['pascalvoc2007'], Literal['object_detection']], Tuple[Dict[str, Dict[str, np.ndarray]], Dict[str, Dict[str, Union[List[int], List[List[int]]]]], Dict[str, Dict[str, Union[int, List[int]]]], List[float], int, Dict[str, int], Literal['face_detection'], Literal['object_detection']]]:
+def prepare_facedetection(path: str, size: Union[int, Tuple[int, int]], box_format: Literal["xyxy", "xywh", "xcycwh"] = "xywh") -> Union[Tuple[Dict[str, Dict[str, np.ndarray]], Dict[str, Dict[str, Union[List[int], List[List[int]]]]], Dict[str, Dict[str, Union[int, List[int]]]], List[float], int, Dict[str, int], Literal['pascalvoc2007'], Literal['object_detection']], Tuple[Dict[str, Dict[str, np.ndarray]], Dict[str, Dict[str, Union[List[int], List[List[int]]]]], Dict[str, Dict[str, Union[int, List[int]]]], List[float], int, Dict[str, int], Literal['facedetection'], Literal['object_detection']]]:
     """
     Method that prepares the "object detection" Face Detection dataset.
 
@@ -285,7 +285,7 @@ def prepare_face_detection(path: str, size: Union[int, Tuple[int, int]], box_for
     :param Union[int, Tuple[int, int]] **size**: Size of images.
     :param Literal["xyxy", "xywh", "xcycwh"] **box_format**: Format of bounding boxes. Set to `"xywh"`.
     :return: Train set, validation set, weights, number of classes, classes with their id, dataset name and dataset type.
-    :rtype: Union[Tuple[Dict[str, Dict[str, np.ndarray]], Dict[str, Dict[str, Union[List[int], List[List[int]]]]], Dict[str, Dict[str, Union[int, List[int]]]], List[float], int, Dict[str, int], Literal['pascalvoc2007'], Literal['object_detection']], Tuple[Dict[str, Dict[str, np.ndarray]], Dict[str, Dict[str, Union[List[int], List[List[int]]]]], Dict[str, Dict[str, Union[int, List[int]]]], List[float], int, Dict[str, int], Literal['face_detection'], Literal['object_detection']]]
+    :rtype: Union[Tuple[Dict[str, Dict[str, np.ndarray]], Dict[str, Dict[str, Union[List[int], List[List[int]]]]], Dict[str, Dict[str, Union[int, List[int]]]], List[float], int, Dict[str, int], Literal['pascalvoc2007'], Literal['object_detection']], Tuple[Dict[str, Dict[str, np.ndarray]], Dict[str, Dict[str, Union[List[int], List[List[int]]]]], Dict[str, Dict[str, Union[int, List[int]]]], List[float], int, Dict[str, int], Literal['facedetection'], Literal['object_detection']]]
     """
     assert isinstance(size, int) or isinstance(size, tuple), f"size has to be an {int} or {tuple} instance, not {type(size)}."
     if isinstance(size, int):
@@ -294,16 +294,16 @@ def prepare_face_detection(path: str, size: Union[int, Tuple[int, int]], box_for
     categories = {"face": 0}
 
     def _positive(value: float):
-        if value <= 0.01:
-            return 0.
-        elif  value >= 1.:
+        if value <= 0.:
+            return 0.01
+        elif value >= 1.:
             return 0.99
         else:
             return value
 
     def _treatment(set: str):
-        images_path = os.path.join(path, f"Face Detection/images/{set}")
-        labels_path = os.path.join(path, f"Face Detection/labels/{set}")
+        images_path = os.path.join(path, f"facedetection/images/{set}")
+        labels_path = os.path.join(path, f"facedetection/labels/{set}")
         images = {}
         bboxes = {}
         labels = {}
@@ -339,9 +339,9 @@ def prepare_face_detection(path: str, size: Union[int, Tuple[int, int]], box_for
                             bboxes[image_id].append(bbox)
                             labels[image_id].append(int(elements[0]))
                 else:
-                    bboxes[image_id] = [[0, 0, 0, 0]]
+                    bboxes[image_id] = []
                     labels[image_id] = [None]
 
         return {"images": images, "bboxes": bboxes, "labels": labels}
                 
-    return _treatment("train"), _treatment("validation"), {0: 1}, len(categories), categories, "face_detection", "object_detection"
+    return _treatment("train"), _treatment("validation"), {0: 1}, len(categories), categories, "facedetection", "object_detection"

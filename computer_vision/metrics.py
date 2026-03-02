@@ -58,7 +58,7 @@ def intersection_over_union(bboxes_preds: torch.Tensor, bboxes_gts: torch.Tensor
     preds_area = abs((preds_x2 - preds_x1) * (preds_y2 - preds_y1))
     ground_truths_area = abs((ground_truths_x2 - ground_truths_x1) * (ground_truths_y2 - ground_truths_y1))
 
-    return intersection / (preds_area + ground_truths_area - intersection + eps)
+    return intersection / (preds_area + ground_truths_area - intersection + eps)    
 
 class Metric(nn.Module):
     """
@@ -71,37 +71,36 @@ class Metric(nn.Module):
         """
         super().__init__()
 
-    def _prepare_gts_and_preds(self, ground_truths: torch.Tensor, predictions: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+    def _prepare_gts_and_preds(self, predictions: torch.Tensor, ground_truths: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Method that prepares ground truths and predictions to have same shape for loss calculation.
 
-        :param Tensor **ground_truths**: Tensor containing the values to predict.
         :param Tensor **predictions**: Tensor containing the model predictions.
-
-        :return: Ground Truths and Predictions with same shape.
+        :param Tensor **ground_truths**: Tensor containing the values to predict.
+        :return: Predictions and ground truths with same shape.
         :rtype: Tensor
         """
-        if ground_truths.shape == predictions.shape:
-            return ground_truths, predictions
-        
         if len(ground_truths.shape) < len(predictions.shape):
             ground_truths = ground_truths.unsqueeze(-1)
 
         if ground_truths.shape[-1] == predictions.shape[-1]:
             if predictions.dtype == bool:
-                return ground_truths, predictions.type(int)
+                return predictions.type(int), ground_truths
             else:
-                return ground_truths, predictions
+                return predictions, ground_truths
         else:
             preds = predictions.argmax(axis=-1, keepdims=True)
 
             shape = ground_truths.shape
-            new_predictions = torch.zeros(shape)
+            new_predictions = torch.zeros(shape).to(ground_truths.device)
+            if shape[-1] == 1:
+                for i in range(ground_truths.shape[0]):
+                    new_predictions[i] = int(preds[i].item())
+            else:
+                for i in range(ground_truths.shape[0]):
+                    new_predictions[i][int(preds[i].item())] = 1
 
-            for i in range(ground_truths.shape[0]):
-                new_predictions[i][int(preds[i].item())] = 1
-
-            return ground_truths, new_predictions
+            return new_predictions, ground_truths
     
 class Accuracy(Metric):
     """
@@ -114,92 +113,92 @@ class Accuracy(Metric):
         super().__init__()
         super().__setattr__("name", "accuracy")
 
-    def forward(self, y: torch.Tensor, y_pred: torch.Tensor) -> float:
+    def forward(self, predictions: torch.Tensor, ground_truths: torch.Tensor) -> float:
         """
         Method that calculates accuracy between predictions and ground_truths.
 
-        :param Tensor **y**: Ground Truths.
-        :param Tensor **y_pred**: Model predictions.
+        :param Tensor **predictions**: Model predictions.
+        :param Tensor **ground_truths**: Ground Truths.
         :return: Accuracy, value between 0 to 1.
         :rtype: float
         """
-        y, y_pred = self._prepare_gts_and_preds(y, y_pred)
+        predictions, ground_truths = self._prepare_gts_and_preds(predictions, ground_truths)
 
-        n = y.shape[0]
-        return (y == y_pred).sum().item() / n
+        n = ground_truths.shape[0]
+        return (ground_truths == predictions).sum().item() / n
 
 class Precision(Metric):
     """
     Precision metric class.
     """
-    def __init__(self, num_classes: int, detailed: bool = False):
+    def __init__(self, num_classes: int, detail: bool = False):
         """
         Initializes the Precision class.
 
         :param int **num_classes**: Number of classes.
-        :param bool **detailed**: Boolean that adds precision per class. Set to `False.
+        :param bool **detail**: Boolean that adds precision per class. Set to `False.
         """
         super().__init__()
         super().__setattr__("name", "precision")
         self.num_classes = num_classes
-        self.detailed = detailed
+        self.detail = detail
 
-    def forward(self, y: torch.Tensor, y_pred: torch.Tensor) -> Union[Tuple[Tuple[float, Dict[int, Union[float, None]]], float], float]:
+    def forward(self, predictions: torch.Tensor, ground_truths: torch.Tensor) -> Union[Tuple[Tuple[float, Dict[int, Union[float, None]]], float], float]:
         """
-        Method that calculates precision between predictions and ground_truths. if detailed is `True` then precision per class is added.
+        Method that calculates precision between predictions and ground_truths. if detail is `True` then precision per class is added.
 
-        :param Tensor **y**: Ground Truths.
-        :param Tensor **y_pred**: Model predictions.
-        :return: Average precision (value between 0 to 1) and if detailed is `True` precision per class.
+        :param Tensor **predictions**: Model predictions.
+        :param Tensor **ground_truths**: Ground Truths.
+        :return: Average precision (value between 0 to 1) and if detail is `True` precision per class.
         :rtype: Union[Tuple[Tuple[float, Dict[int, Union[float, None]]], float], float]
         """ 
-        if self.detailed:
-            return self._forward_d(y, y_pred)
+        if self.detail:
+            return self._forward_d(predictions, ground_truths)
         else:
-            return self._forward_nd(y, y_pred)
+            return self._forward_nd(predictions, ground_truths)
 
-    def _forward_nd(self, y: torch.Tensor, y_pred: torch.Tensor) -> float:
+    def _forward_nd(self, predictions: torch.Tensor, ground_truths: torch.Tensor) -> float:
         """
         Method that calculates precision between predictions and ground_truths.
 
-        :param Tensor **y**: Ground Truths.
-        :param Tensor **y_pred**: Model predictions.
+        :param Tensor **predictions**: Model predictions.
+        :param Tensor **ground_truths**: Ground Truths.
         :return: Average precision (value between 0 to 1) and precision per class.
         :rtype: float
         """ 
-        y, y_pred = self._prepare_gts_and_preds(y, y_pred)
+        predictions, ground_truths = self._prepare_gts_and_preds(predictions, ground_truths)
 
-        classes_present = y.unique()
+        classes_present = ground_truths.unique()
 
         average_precision = 0
 
         for class_label in classes_present:
-            true_positive = ((y_pred == class_label.item()) & (y == class_label.item())).sum().item()
-            predicted_positive = (y_pred == class_label.item()).sum().item()
+            true_positive = ((predictions == class_label.item()) & (ground_truths == class_label.item())).sum().item()
+            predicted_positive = (predictions == class_label.item()).sum().item()
 
             average_precision += true_positive / predicted_positive if predicted_positive != 0 else 0
         
         average_precision /= len(classes_present)
         return average_precision
     
-    def _forward_d(self, y: torch.Tensor, y_pred: torch.Tensor) -> Tuple[float, Dict[int, Union[float, None]]]:
+    def _forward_d(self, predictions: torch.Tensor, ground_truths: torch.Tensor) -> Tuple[float, Dict[int, Union[float, None]]]:
         """
-        Method that calculates precision between predictions and ground_truths in a detailed way.
+        Method that calculates precision between predictions and ground_truths in a detail way.
 
-        :param Tensor **y**: Ground Truths.
-        :param Tensor **y_pred**: Model predictions.
+        :param Tensor **predictions**: Model predictions.
+        :param Tensor **ground_truths**: Ground Truths.
         :return: Average precision (value between 0 to 1) and precision per class.
         :rtype: Tuple[float, Dict[int, Union[float, None]]]
         """
-        y, y_pred = self._prepare_gts_and_preds(y, y_pred)
+        predictions, ground_truths = self._prepare_gts_and_preds(predictions, ground_truths)
 
-        classes_present = y.unique()
+        classes_present = ground_truths.unique()
 
-        precision_per_class = dict([(int(label.item()), None) for label in y.unique()])
+        precision_per_class = dict([(int(label.item()), None) for label in ground_truths.unique()])
 
         for class_label in classes_present:
-            true_positive = ((y_pred == class_label.item()) & (y == class_label.item())).sum().item()
-            predicted_positive = (y_pred == class_label.item()).sum().item()
+            true_positive = ((predictions == class_label.item()) & (ground_truths == class_label.item())).sum().item()
+            predicted_positive = (predictions == class_label.item()).sum().item()
 
             precision = true_positive / predicted_positive if predicted_positive != 0 else 0
             precision_per_class[int(class_label)] = precision
@@ -211,74 +210,74 @@ class Recall(Metric):
     """
     Recall metric class.
     """
-    def __init__(self, num_classes: int, detailed: bool = False):
+    def __init__(self, num_classes: int, detail: bool = False):
         """
         Initializes the Recall class.
 
         :param int **num_classes**: Number of classes.
-        :param bool **detailed**: Boolean that adds precision per class. Set to `False.
+        :param bool **detail**: Boolean that adds precision per class. Set to `False.
         """
         super().__init__()
         super().__setattr__("name", "recall")
         self.num_classes = num_classes
-        self.detailed = detailed
+        self.detail = detail
 
-    def forward(self, y: torch.Tensor, y_pred: torch.Tensor) -> Union[Tuple[Tuple[float, Dict[int, Union[float, None]]], float], float]:
+    def forward(self, predictions: torch.Tensor, ground_truths: torch.Tensor) -> Union[Tuple[Tuple[float, Dict[int, Union[float, None]]], float], float]:
         """
-        Method that calculates recall between predictions and ground_truths. if detailed is `True` then recall per class is added.
+        Method that calculates recall between predictions and ground_truths. if detail is `True` then recall per class is added.
 
-        :param Tensor **y**: Ground Truths.
-        :param Tensor **y_pred**: Model predictions.
-        :return: Average recall (value between 0 to 1) and if detailed is `True` precision per class.
+        :param Tensor **predictions**: Model predictions.
+        :param Tensor **ground_truths**: Ground Truths.
+        :return: Average recall (value between 0 to 1) and if detail is `True` precision per class.
         :rtype: Union[Tuple[Tuple[float, Dict[int, Union[float, None]]], float], float]
         """ 
-        if self.detailed:
-            return self._forward_d(y, y_pred)
+        if self.detail:
+            return self._forward_d(predictions, ground_truths)
         else:
-            return self._forward_nd(y, y_pred)
+            return self._forward_nd(predictions, ground_truths)
 
-    def _forward_nd(self, y: torch.Tensor, y_pred: torch.Tensor) -> float:
+    def _forward_nd(self, predictions: torch.Tensor, ground_truths: torch.Tensor) -> float:
         """
         Method that calculates recall between predictions and ground_truths.
 
-        :param Tensor **y**: Ground Truths.
-        :param Tensor **y_pred**: Model predictions.
+        :param Tensor **predictions**: Model predictions.
+        :param Tensor **ground_truths**: Ground Truths.
         :return: Average recall (value between 0 to 1).
         :rtype: float
         """
-        y, y_pred = self._prepare_gts_and_preds(y, y_pred)
+        predictions, ground_truths = self._prepare_gts_and_preds(predictions, ground_truths)
         
-        classes_present = y.unique()
+        classes_present = ground_truths.unique()
 
         recall = 0.
 
         for class_label in classes_present:
-            true_positive = ((y_pred == class_label.item()) & (y == class_label.item())).sum().item()
-            actual_positive = (y == class_label.item()).sum().item()
+            true_positive = ((predictions == class_label.item()) & (ground_truths == class_label.item())).sum().item()
+            actual_positive = (ground_truths == class_label.item()).sum().item()
             
             recall += true_positive / actual_positive if actual_positive != 0 else 0
 
         recall /= len(classes_present)
         return recall
 
-    def _forward_d(self, y: torch.Tensor, y_pred: torch.Tensor) -> Tuple[float, Dict[int, Union[float, None]]]:
+    def _forward_d(self, predictions: torch.Tensor, ground_truths: torch.Tensor) -> Tuple[float, Dict[int, Union[float, None]]]:
         """
-        Method that calculates recall between predictions and ground_truths in a detailed way.
+        Method that calculates recall between predictions and ground_truths in a detail way.
 
-        :param Tensor **y**: Ground Truths.
-        :param Tensor **y_pred**: Model predictions.
+        :param Tensor **predictions**: Model predictions.
+        :param Tensor **ground_truths**: Ground Truths.
         :return: Average recall (value between 0 to 1) and recall per class.
         :rtype: Tuple[float, Dict[int, Union[float, None]]]
         """
-        y, y_pred = self._prepare_gts_and_preds(y, y_pred)
+        predictions, ground_truths = self._prepare_gts_and_preds(predictions, ground_truths)
 
-        recall_per_class = dict([(int(label.item()), None) for label in y.unique()])
+        recall_per_class = dict([(int(label.item()), None) for label in ground_truths.unique()])
 
-        classes_present = y.unique()
+        classes_present = ground_truths.unique()
 
         for class_label in classes_present:
-            true_positive = ((y_pred == class_label.item()) & (y == class_label.item())).sum().item()
-            actual_positive = (y == class_label.item()).sum().item()
+            true_positive = ((predictions == class_label.item()) & (ground_truths == class_label.item())).sum().item()
+            actual_positive = (ground_truths == class_label.item()).sum().item()
             recall = true_positive / actual_positive if actual_positive != 0 else 0
             recall_per_class[int(class_label)] = recall
 
@@ -289,65 +288,65 @@ class F1_Score(Metric):
     """
     F1-Score metric class.
     """
-    def __init__(self, num_classes: int, detailed: bool = False):
+    def __init__(self, num_classes: int, detail: bool = False):
         """
         Initializes the F1_score class.
 
         :param int **num_classes**: Number of classes.
-        :param bool **detailed**: Boolean that adds precision per class. Set to `False.
+        :param bool **detail**: Boolean that adds precision per class. Set to `False.
         """
         super().__init__()
         super().__setattr__("name", "f1_score")
         self.num_classes = num_classes
-        self.precision = Precision(num_classes, detailed=detailed)
-        self.recall = Recall(num_classes, detailed=detailed)
-        self.detailed = detailed
+        self.precision = Precision(num_classes, detail=detail)
+        self.recall = Recall(num_classes, detail=detail)
+        self.detail = detail
 
-    def forward(self, y: torch.Tensor, y_pred: torch.Tensor) -> Union[Tuple[Tuple[float, Dict[int, Union[float, None]]], float], float]:
+    def forward(self, predictions: torch.Tensor, ground_truths: torch.Tensor) -> Union[Tuple[Tuple[float, Dict[int, Union[float, None]]], float], float]:
         """
-        Method that calculates f1-score between predictions and ground_truths. if detailed is `True` then f1-score per class is added.
-
-        :param Tensor **y**: Ground Truths.
-        :param Tensor **y_pred**: Model predictions.
-        :return: Average f1-score (value between 0 to 1) and if detailed is `True` precision per class.
+        Method that calculates f1-score between predictions and ground_truths. if detail is `True` then f1-score per class is added.
+        
+        :param Tensor **predictions**: Model predictions.
+        :param Tensor **ground_truths**: Ground Truths.
+        :return: Average f1-score (value between 0 to 1) and if detail is `True` precision per class.
         :rtype: Union[Tuple[Tuple[float, Dict[int, Union[float, None]]], float], float]
         """ 
-        if self.detailed:
-            return self._forward_d(y, y_pred)
+        if self.detail:
+            return self._forward_d(predictions, ground_truths)
         else:
-            return self._forward_nd(y, y_pred)
+            return self._forward_nd(predictions, ground_truths)
 
-    def _forward_nd(self, y: torch.Tensor, y_pred: torch.Tensor) -> float:
+    def _forward_nd(self, predictions: torch.Tensor, ground_truths: torch.Tensor) -> float:
         """
         Method that calculates f1-score between predictions and ground_truths.
 
-        :param Tensor **y**: Ground Truths.
-        :param Tensor **y_pred**: Model predictions.
+        :param Tensor **predictions**: Model predictions.
+        :param Tensor **ground_truths**: Ground Truths.
         :return: Average F1-score (value between 0 to 1).
         :rtype: float
         """
-        y, y_pred = self._prepare_gts_and_preds(y, y_pred)
+        predictions, ground_truths = self._prepare_gts_and_preds(predictions, ground_truths)
 
-        avg_prec = self.precision(y, y_pred)
-        avg_rec = self.recall(y, y_pred)  
+        avg_prec = self.precision(predictions, ground_truths)
+        avg_rec = self.recall(predictions, ground_truths)  
 
         average_f1 = 2 * (avg_prec * avg_rec) / (avg_prec + avg_rec) if avg_prec != 0 and avg_rec != 0 else 0
 
         return average_f1
         
-    def _forward_d(self, y: torch.Tensor, y_pred: torch.Tensor) -> Tuple[float, Dict[int, Union[float, None]]]:
+    def _forward_d(self, predictions: torch.Tensor, ground_truths: torch.Tensor) -> Tuple[float, Dict[int, Union[float, None]]]:
         """
-        Method that calculates f1-score between predictions and ground_truths in a detailed way.
+        Method that calculates f1-score between predictions and ground_truths in a detail way.
 
-        :param Tensor **y**: Ground Truths.
-        :param Tensor **y_pred**: Model predictions.
+        :param Tensor **predictions**: Model predictions.
+        :param Tensor **ground_truths**: Ground Truths.
         :return: Average F1-score (value between 0 to 1) and F1-score per class.
         :rtype: Tuple[float, Dict[int, Union[float, None]]]
         """
-        y, y_pred = self._prepare_gts_and_preds(y, y_pred)
+        predictions, ground_truths = self._prepare_gts_and_preds(predictions, ground_truths)
 
-        avg_prec, prec_per_class = self.precision(y, y_pred)
-        avg_rec, rec_per_class = self.recall(y, y_pred)
+        avg_prec, prec_per_class = self.precision(predictions, ground_truths)
+        avg_rec, rec_per_class = self.recall(predictions, ground_truths)
         average_f1 = 2 * (avg_prec * avg_rec) / (avg_prec + avg_rec) if avg_prec != 0 and avg_rec != 0 else 0
 
         f1_per_class = {}
@@ -360,90 +359,92 @@ class Mean_Average_Precision(Metric):
     """
     Mean Average Precision metric class.
     """
-    def __init__(self, num_classes: int, batch_size: int, iou_threshold: float = 0.5, detailed: bool = False):
+    def __init__(self, num_classes: int, batch_size: int, iou_threshold: float = 0.5, detail: bool = False):
         """
         Initializes Mean Average Precision class.
 
         :param int **num_classes**: Number of classes.
         :param int **batch**: Size of the batch.
         :param float **iou_threshold**: Threshold for IoU. Set to `0.5`.
-        :param bool **detailed**: Boolean that adds precision per class. Set to `False.
+        :param bool **detail**: Boolean that adds precision per class. Set to `False.
         """
         super().__init__()
         super().__setattr__("name", f"mAP@{int(iou_threshold * 100)}")
         self._num_classes = num_classes
         self._batch_size = batch_size
         self._iou_threshold = iou_threshold
-        self.detailed = detailed
+        self.detail = detail
 
-    def forward(self, y: torch.Tensor, y_pred: torch.Tensor) -> Union[Tuple[Tuple[float, Dict[int, Union[float, None]]], float], float]:
+    def forward(self, predictions: List[List[List[torch.Tensor]]], ground_truths: List[List[List[torch.Tensor]]]) -> Union[Tuple[Tuple[float, Dict[int, Union[float, None]]], float], float]:
         """
-        Method that calculates mAP between predictions and ground_truths. if detailed is `True` then f1-score per class is added.
-
-        :param Tensor **y**: Ground Truths.
-        :param Tensor **y_pred**: Model predictions.
-        :return: Average mAP (value between 0 to 1) and if detailed is `True` mAP per class.
+        Method that calculates mAP between predictions and ground_truths. if detail is `True` then f1-score per class is added.
+        
+        :param List[List[List[torch.Tensor]]] **predictions**: Model predictions.
+        :param List[List[List[torch.Tensor]]] **ground_truths**: Ground Truths.
+        :return: Average mAP (value between 0 to 1) and if detail is `True` mAP per class.
         :rtype: Union[Tuple[Tuple[float, Dict[int, Union[float, None]]], float], float]
         """ 
-        if self.detailed:
-            return self._forward_d(y, y_pred)
+        if self.detail:
+            return self._forward_d(predictions, ground_truths)
         else:
-            return self._forward_nd(y, y_pred)
+            return self._forward_nd(predictions, ground_truths)
 
-    def _forward_nd(self, predictions_bboxes: List[List[Union[float, int]]], ground_truths_bboxes: List[List[Union[float, int]]]) -> float:
+    def _forward_nd(self, predictions: List[List[List[torch.Tensor]]], ground_truths: List[List[List[torch.Tensor]]]) -> float:
         """
         Method that calculates mAP between predictions and ground_truths.
 
-        :param List[List[Union[float, int]]] **predictions_bboxes**: Bounding boxes of predictions.
-        :param List[List[Union[float, int]]] **ground_truths_bboxes**: Bounding boxes of ground_truths.
+        :param List[List[List[torch.Tensor]]] **predictions**: Bounding boxes of predictions.
+        :param List[List[List[torch.Tensor]]] **ground_truths**: Bounding boxes of ground_truths.
         :return: Average mAP (value between 0 to 1).
         :rtype: float
         """
         mean_average_precision = []
 
-        for preds_bboxes, gts_bboxes in zip(predictions_bboxes, ground_truths_bboxes):
-            total_bboxes_per_batch = [0] * self._batch_size
-            for gt_bbox in gts_bboxes:
-                total_bboxes_per_batch[int(gt_bbox[0].item())] += 1
-
+        for preds_bboxes, gts_bboxes in zip(predictions, ground_truths):
+            if len(gts_bboxes) == 0:
+                print("continue")
+                continue
+            
             amount_bboxes = Counter([gt[0] for gt in gts_bboxes])
             for key, val in amount_bboxes.items():
                 amount_bboxes[key] = torch.zeros(val)
-                            
-            preds_bboxes.sort(key=lambda box: box[2], reverse=True)
+
+            if self._num_classes > 1:              
+                preds_bboxes.sort(key=lambda box: box[2], reverse=True)
+            else:
+                preds_bboxes.sort(key=lambda box: box[1], reverse=True)
+
             true_positive = torch.zeros((len(preds_bboxes)))
             false_positive = torch.zeros((len(preds_bboxes)))
-            total_gt_bboxes = len(gts_bboxes)     
-
-            if total_gt_bboxes == 0:
-                continue
 
             for pred_idx, pred_bbox in enumerate(preds_bboxes):
                 best_iou = 0
 
                 for gt_idx, gt in enumerate(gts_bboxes):
-                    iou = intersection_over_union(pred_bbox[3:], gt[3:])
-
+                    if self._num_classes > 1:
+                        if pred_bbox[1] != gt[1]:
+                            continue
+                    iou = intersection_over_union(pred_bbox[3:], gt[3:]) if self._num_classes > 1 else intersection_over_union(pred_bbox[2:], gt[2:])
                     if iou > best_iou:
                         best_iou = iou
                         best_gt_idx = gt_idx
 
-                    if best_iou > self._iou_threshold:
-                        if amount_bboxes[best_gt_idx] == 0:
-                            true_positive[pred_idx] = 1
-                            amount_bboxes[best_gt_idx] = 1
-                        else:
-                            false_positive[pred_idx] = 1
+                if best_iou > self._iou_threshold:
+                    if amount_bboxes[best_gt_idx] == 0:
+                        true_positive[pred_idx] = 1
+                        amount_bboxes[best_gt_idx] = 1
                     else:
                         false_positive[pred_idx] = 1
+                else:
+                    false_positive[pred_idx] = 1
 
-                true_positive_cumsum = true_positive.cumsum(dim=0)
-                false_positive_cumsum = false_positive.cumsum(dim=0)
+            true_positive_cumsum = true_positive.cumsum(dim=0)
+            false_positive_cumsum = false_positive.cumsum(dim=0)
 
-                recalls = true_positive_cumsum / (total_gt_bboxes + 1e-9)
-                precisions = true_positive_cumsum / (true_positive_cumsum + false_positive_cumsum + 1e-9)
+            recalls = true_positive_cumsum / (len(gts_bboxes) + 1e-16)
+            precisions = true_positive_cumsum / (true_positive_cumsum + false_positive_cumsum + 1e-16)
 
-                mean_average_precision.append(torch.trapz(precisions, recalls).item())
+            mean_average_precision.append(torch.trapz(precisions, recalls).item())
 
         if len(mean_average_precision) != 0:
             mean_average_precision = sum(mean_average_precision) / len(mean_average_precision)
@@ -452,27 +453,27 @@ class Mean_Average_Precision(Metric):
 
         return mean_average_precision
 
-    def _forward_d(self, predictions_bboxes: List[List[Union[float, int]]], ground_truths_bboxes: List[List[Union[float, int]]]) -> Tuple[float, Dict[int, Union[float, None]]]:
+    def _forward_d(self, predictions: List[List[List[torch.Tensor]]], ground_truths: List[List[List[torch.Tensor]]]) -> Tuple[float, Dict[int, Union[float, None]]]:
         """
         Method that calculates mAP between predictions and ground_truths.
 
-        :param List[List[Union[float, int]]] **predictions_bboxes**: Bounding boxes of predictions.
-        :param List[List[Union[float, int]]] **ground_truths_bboxes**: Bounding boxes of ground_truths.
+        :param List[List[List[torch.Tensor]]] **predictions**: Bounding boxes of predictions.
+        :param List[List[List[torch.Tensor]]] **ground_truths**: Bounding boxes of ground_truths.
         :return: Average mAP (value between 0 to 1) and mAP per class.
         :rtype: Tuple[float, Dict[int, Union[float, None]]]
         """
         average_precision_per_class = {}
 
-        for label, (preds_bboxes, gts_bboxes) in enumerate(zip(predictions_bboxes, ground_truths_bboxes)):
-            total_bboxes_per_batch = [0] * self._batch_size
-            for gt_bbox in gts_bboxes:
-                total_bboxes_per_batch[int(gt_bbox[0].item())] += 1
-
+        for label, (preds_bboxes, gts_bboxes) in enumerate(zip(predictions, ground_truths)):
             amount_bboxes = Counter([gt[0] for gt in gts_bboxes])
             for key, val in amount_bboxes.items():
                 amount_bboxes[key] = torch.zeros(val)
                             
-            preds_bboxes.sort(key=lambda box: box[2], reverse=True)
+            if self._num_classes > 1:              
+                preds_bboxes.sort(key=lambda box: box[2], reverse=True)
+            else:
+                preds_bboxes.sort(key=lambda box: box[1], reverse=True)
+            
             true_positive = torch.zeros((len(preds_bboxes)))
             false_positive = torch.zeros((len(preds_bboxes)))
             total_gt_bboxes = len(gts_bboxes)     
@@ -484,31 +485,33 @@ class Mean_Average_Precision(Metric):
                 best_iou = 0
 
                 for gt_idx, gt in enumerate(gts_bboxes):
-                    iou = intersection_over_union(pred_bbox[3:], gt[3:])
-
+                    if self._num_classes > 1:
+                        if pred_bbox[1] != gt[1]:
+                            continue
+                    iou = intersection_over_union(pred_bbox[3:], gt[3:]) if self._num_classes > 1 else intersection_over_union(pred_bbox[2:], gt[2:])
                     if iou > best_iou:
                         best_iou = iou
                         best_gt_idx = gt_idx
 
-                    if best_iou > self._iou_threshold:
-                        if amount_bboxes[best_gt_idx] == 0:
-                            true_positive[pred_idx] = 1
-                            amount_bboxes[best_gt_idx] = 1
-                        else:
-                            false_positive[pred_idx] = 1
+                if best_iou > self._iou_threshold:
+                    if amount_bboxes[best_gt_idx] == 0:
+                        true_positive[pred_idx] = 1
+                        amount_bboxes[best_gt_idx] = 1
                     else:
                         false_positive[pred_idx] = 1
-
-                true_positive_cumsum = true_positive.cumsum(dim=0)
-                false_positive_cumsum = false_positive.cumsum(dim=0)
-
-                recalls = true_positive_cumsum / (total_gt_bboxes + 1e-9)
-                precisions = true_positive_cumsum / (true_positive_cumsum + false_positive_cumsum + 1e-9)
-
-                if label in average_precision_per_class.keys():
-                    average_precision_per_class[label].append(torch.trapz(precisions, recalls).item())
                 else:
-                    average_precision_per_class[label] = [torch.trapz(precisions, recalls).item()]
+                    false_positive[pred_idx] = 1
+
+            true_positive_cumsum = true_positive.cumsum(dim=0)
+            false_positive_cumsum = false_positive.cumsum(dim=0)
+
+            recalls = true_positive_cumsum / (total_gt_bboxes + 1e-9)
+            precisions = true_positive_cumsum / (true_positive_cumsum + false_positive_cumsum + 1e-9)
+
+            if label in average_precision_per_class.keys():
+                average_precision_per_class[label].append(torch.trapz(precisions, recalls).item())
+            else:
+                average_precision_per_class[label] = [torch.trapz(precisions, recalls).item()]
             
             if label in average_precision_per_class.keys():
                 if average_precision_per_class[label] != 0:

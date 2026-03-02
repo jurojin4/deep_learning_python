@@ -1,0 +1,21 @@
+experiment name:pwjjr324|dataset type:object_detection|dataset:facedetection|classes:1|image size:(224, 224)|model parameters:61544653|epochs:45|batch:16|optimizer:Adam|learning rate: 0.001|loss:YOLOV3Loss|scheduler:MultiStepLR|milestones:Counter({2: 1, 45: 1, 75: 1})|iou threshold overlap:0.2|confidence threshold:0.5
+model_checkpoint_1: 10.6549 of loss for validation stage.
+model_checkpoint_2: 7.4520 of loss for validation stage.
+model_checkpoint_3: 6.2062 of loss for validation stage.
+model_checkpoint_4: 5.9044 of loss for validation stage.
+model_checkpoint_5: 5.4450 of loss for validation stage.
+model_checkpoint_6: 5.0958 of loss for validation stage.
+model_checkpoint_7: 4.4670 of loss for validation stage.
+model_checkpoint_9: 4.3979 of loss for validation stage.
+model_checkpoint_10: 3.9972 of loss for validation stage.
+model_checkpoint_11: 3.7999 of loss for validation stage.
+model_checkpoint_12: 3.6840 of loss for validation stage.
+model_checkpoint_14: 3.4009 of loss for validation stage.
+model_checkpoint_16: 3.2394 of loss for validation stage.
+model_checkpoint_19: 3.1229 of loss for validation stage.
+model_checkpoint_24: 2.9286 of loss for validation stage.
+model_checkpoint_28: 2.8493 of loss for validation stage.
+model_checkpoint_32: 2.7834 of loss for validation stage.
+model_checkpoint_38: 2.7704 of loss for validation stage.
+model_checkpoint_39: 2.6799 of loss for validation stage.
+model_checkpoint_43: 2.6773 of loss for validation stage.
