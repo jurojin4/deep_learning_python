@@ -1,5 +1,6 @@
 from math import floor
 from typing import Literal
+from ...modules import ConvBlock
 
 import os
 import torch
@@ -16,57 +17,15 @@ darknet_architecture = [
     (256, 1, 1, 0),
     (512, 3, 1, 1),
     "maxpooling",
-    [(256, 1, 1, 0), (512, 3, 1, 1)]*4,
+    [(256, 1, 1, 0), (512, 3, 1, 1)] * 4,
     (512, 1, 1, 0),
     (1024, 3, 1, 1),
     "maxpooling",
-    [(512, 1, 1, 0), (1024, 3, 1, 1)]*2,
+    [(512, 1, 1, 0), (1024, 3, 1, 1)] * 2,
     (1024, 3, 1, 1),
     (1024, 3, 2, 1),
     (1024, 3, 1, 1),
     (1024, 3, 1, 1)]
-
-class ConvBlock(nn.Module):
-    """
-    YOLOV1 Convolutional Block class.
-    """
-    def __init__(self, in_channels: int, out_channels: int, conv_kernel_size: int, conv_stride: int, conv_padding: int, batch_normalization: bool = False, bias: bool = True):
-        """
-        Initializes the ConvBlock class.
-
-        :param int **in_channels**: Number that represents the size of the first dimension for a 3D object in torch.
-        :param int **out_channels**: Number that represents the number of features maps, i.e the number of convolutional neurons doing a 2D convolution on the input.
-        :param int **conv_kernel_size**: Size of the convolution kernel.
-        :param int **conv_stride**: Size of the convolution stride.
-        :param int **conv_padding**: Size of the convolution padding.
-        :param bool **batch_normalization**: Set to `False`, if `True` then a batch normalization layer is added to the convolutional block.
-        :param bool **bias**: Set to `True`, adds bias to the weighted sum before applying the activation function.
-        """
-        assert isinstance(out_channels, int), f"out_channels has to be an {int} instance, not {type(out_channels)}."
-        assert isinstance(conv_kernel_size, int), f"conv_kernel_size has to be an {int} instance, not {type(conv_kernel_size)}."
-        assert isinstance(conv_stride, int), f"conv_stride has to be an {int} instance, not {type(conv_stride)}."
-        assert isinstance(conv_padding, int), f"conv_padding has to be an {int} instance, not {type(conv_padding)}."
-        super().__init__()
-
-        self.conv2d = nn.Conv2d(in_channels=in_channels, out_channels=out_channels, kernel_size=conv_kernel_size, stride=conv_stride, padding=conv_padding, bias=bias)
-
-        self._has_batch_normalization = batch_normalization
-        if batch_normalization:
-            self.batch_normalization = nn.BatchNorm2d(out_channels)
-        self.act_fn = nn.LeakyReLU(0.1)
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """
-        Method that forwards an input Tensor into the ConvBlock instance.
-
-        :param Tensor **x**: Input tensor.
-        :return: Output tensor.
-        :rtype: Tensor
-        """
-        if self._has_batch_normalization:
-            return self.act_fn(self.batch_normalization(self.conv2d(x)))
-        else:
-            return self.act_fn(self.conv2d(x))
 
 class Darknet(nn.Module):
     """
@@ -77,7 +36,7 @@ class Darknet(nn.Module):
         Initializes the Darknet class.
 
         :param int **in_channels**: Number that represents the size of the first dimension for a 3D object in torch.
-        :param int **img_size**: Size of the input image of dimension (Batch, Size, Size, 3).
+        :param int **img_size**: Size of the input image of dimension (batch, size, size, 3).
         :param bool **batch_normalization**: Set to `False`, if `True` then a batch normalization layer is added to the convolutional block.
         :param bool **bias**: Set to `True`, adds bias to the weighted sum before applying the activation function.
         """
@@ -108,7 +67,7 @@ class Darknet(nn.Module):
         sequential = []
         for block in darknet_architecture:
             if isinstance(block, tuple):
-                sequential.append(ConvBlock(in_channels=in_channels, out_channels=block[0], conv_kernel_size=block[1], conv_stride=block[2], conv_padding=block[3], batch_normalization=batch_normalization, bias=bias))
+                sequential.append(ConvBlock(in_channels=in_channels, out_channels=block[0], kernel_size=block[1], stride=block[2], padding=block[3], batch_normalization=batch_normalization, bias=bias))
                 self._img_size = self._size_image(self._img_size, kernel=block[1], stride=block[2], padding=block[3])
             
             if isinstance(block, str):
@@ -119,7 +78,7 @@ class Darknet(nn.Module):
 
             if isinstance(block, list):
                 for b in block:
-                    sequential.append(ConvBlock(in_channels=in_channels, out_channels=b[0], conv_kernel_size=b[1], conv_stride=b[2], conv_padding=b[3], batch_normalization=batch_normalization, bias=bias))
+                    sequential.append(ConvBlock(in_channels=in_channels, out_channels=b[0], kernel_size=b[1], stride=b[2], padding=b[3], batch_normalization=batch_normalization, bias=bias))
                     in_channels = b[0]
                     self._img_size = self._size_image(self._img_size, kernel=b[1], stride=b[2], padding=b[3])
 
@@ -144,12 +103,12 @@ class Head(nn.Module):
     """
     YOLOV1 Head class.
     """
-    def __init__(self, size: int, C: int, S: int, B: int, mode: Literal["classification", "object_detection"]):
+    def __init__(self, size: int, num_classes: int, S: int, B: int, mode: Literal["classification", "object_detection"]):
         """
         Initializes the Head class.
 
         :param int **size**: Image size after the forward darknet network.
-        :param int **C**: Number of classes to predict.
+        :param int **num_classes**: Number of classes to predict.
         :param int **S**: Cells number along height and width.
         :param int **B**: Bounding boxes number in each cell.
         :param Literal["classification", "object_detection"] **mode**: String that defines the model mode.
@@ -157,7 +116,7 @@ class Head(nn.Module):
         super().__init__()
         self._S = S
         self._B = B
-        self._C = C
+        self._num_classes = num_classes
         self._head = self._create_head(size=size, mode=mode)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -183,7 +142,7 @@ class Head(nn.Module):
                 nn.Linear(1024 * size * size, 4096),
                 nn.Dropout(0.5),
                 nn.LeakyReLU(0.1),
-                nn.Linear(4096, self._C),
+                nn.Linear(4096, self._num_classes),
                 nn.Softmax(dim = -1)])
         else:
             return nn.Sequential(
@@ -191,16 +150,19 @@ class Head(nn.Module):
                 nn.Linear(1024 * size * size, 4096),
                 nn.Dropout(0.5),
                 nn.LeakyReLU(0.1),
-                nn.Linear(4096, self._S * self._S * (self._C + (self._B * 5)))])
+                nn.Linear(4096, self._S * self._S * (self._num_classes + (self._B * 5)))])
 
 class YOLOV1(nn.Module):
-    def __init__(self, in_channels: int, img_size: int, C: int, S: int = 7, B: int = 2, batch_normalization: bool = False, bias: bool = True, mode: Literal["classification", "object_detection"] = "object_detection"):
+    """
+    YOLOV1 class.
+    """
+    def __init__(self, in_channels: int, img_size: int, num_classes: int, S: int = 7, B: int = 2, batch_normalization: bool = False, bias: bool = True, mode: Literal["classification", "object_detection"] = "object_detection"):
         """
         Initializes the YOLOV1 class.
 
         :param int **in_channels**: Number that represents the size of the first dimension for a 3D object in torch.
         :param int **img_size**: Size of the input image of dimension (Batch, Size, Size, 3).
-        :param int **C**: Number of classes to predict.
+        :param int **num_classes**: Number of classes to predict.
         :param int **S**: Cells number along height and width. Set to `7`.
         :param int **B**: Bounding boxes number in each cell. Set to `2`.
         :param bool **batch_normalization**: Set to `False`, if `True` then a batch normalization layer is added to the convolutional block.
@@ -221,9 +183,9 @@ class YOLOV1(nn.Module):
         else:
             self.S = S
             self.B = B
-        self.C = C
+        self.num_classes = num_classes if num_classes > 1 else 0
 
-        self._head = Head(self._backbone._img_size, C=C, S=self.S, B=self.B, mode=mode)
+        self._head = Head(self._backbone._img_size, num_classes=num_classes, S=self.S, B=self.B, mode=mode)
         self._mode = mode
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -261,22 +223,12 @@ class YOLOV1(nn.Module):
         :param bool **all**: Boolean that allows loading either all weights or only the convolution weights. Set to `False`.
         """
         if all:
-            self.load_state_dict(torch.load(weights_path))
+            self.load_state_dict(torch.load(weights_path, map_location=next(self.parameters()).device))
             print("Model load completely.")
         else:
-            model_weights = torch.load(weights_path)
+            model_weights = torch.load(weights_path, map_location=next(self.parameters()).device)
             for key in list(model_weights.keys()):
                 if "head" in key:
                     model_weights.pop(key)
             self.load_state_dict(model_weights, strict=False)
             print("Model load partially.")
-
-
-def init_weights(m):
-    if isinstance(m, ConvBlock):
-        nn.init.uniform(m.conv2d.weight, a=0, b=1)
-        m.conv2d.weight.data *= 1 # scale down to ~1e-2
-    if isinstance(m, nn.Linear):
-        nn.init.uniform_(m.weight, a=-1, b=1)
-        m.weight.data *= 100
-

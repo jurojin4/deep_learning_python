@@ -1,0 +1,45 @@
+from .trainer import YOLOV3Trainer
+
+import argparse
+
+def get_args_parser(add_help=True):
+    parser = argparse.ArgumentParser(description='YOLOV3 Trainer', add_help=add_help)
+    parser.add_argument("--dataset_name", default="pascalvoc2012", type=str, help='datasets available: ["cifar10", "facedetection", "pascalvoc2007", "pascalvoc2012", "tiny-imagenet200"]')
+    parser.add_argument("--dataset_path", default=None, type=str, help="directory where the dataset is")
+    parser.add_argument("--epochs", default=100, type=int, help="number of epochs during training")
+    parser.add_argument("--size", default=224, type=int, help="size of dataset images")
+    parser.add_argument("--batch_size", default=16, type=int, help="batch size during training")
+    parser.add_argument("--learning_rate", default=1e-3, type=float, help="learning rate during training")
+    parser.add_argument("--milestones", default=[2, 45, 75], type=list, help="")
+    parser.add_argument("--detail", action="store_true", help="extra details for metrics")
+    parser.add_argument("--no_measure", action="store_true", help="No metrics will be measured")
+    parser.add_argument("--save", action="store_true", help="save model during training")
+    parser.add_argument("--save_metric", default="loss", type=str, help="metric used for model save")
+    parser.add_argument("--box_format", default="xywh", type=str, help="format of bounding boxes")
+    parser.add_argument("--delete", action="store_true", help="delete dataset if it has been downloaded")
+    parser.add_argument("--weights_path", default=None, type=str, help="")
+    parser.add_argument("--load_all", action="store_true", help="")
+    parser.add_argument("--experiment_name", default=None, type=str, help="Name of the experiment")
+    parser.add_argument("--no_verbose", action="store_true", help="detailed training on terminal")
+    return parser
+
+if __name__ == "__main__":
+    args = get_args_parser().parse_args()
+    trainer = YOLOV3Trainer(dataset_name=args.dataset_name,
+                dataset_path=args.dataset_path,
+                epochs=args.epochs,
+                size=args.size,
+                batch_size=args.batch_size,
+                learning_rate=args.learning_rate,
+                milestones=args.milestones,
+                detail=args.detail,
+                no_measure=args.no_measure,
+                save=args.save,
+                save_metric=args.save_metric,
+                box_format=args.box_format,
+                delete=args.delete,
+                weights_path=args.weights_path,
+                load_all=args.load_all,
+                experiment_name=args.experiment_name,
+                no_verbose=args.no_verbose)
+    trainer()

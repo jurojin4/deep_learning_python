@@ -1,5 +1,7 @@
 computer_vision/yolo/yolo_v1/show.py
 computer_vision/yolo/yolo_v1/yolo_readme_explanation_plots.ipynb
+computer_vision/comparison.py
+computer_vision/comparison_plots/
 framework_scratch/main.py
 framework_scratch/anim.py
 framework_scratch/evolution.py
