@@ -1,7 +1,10 @@
-computer_vision/yolo/yolo_v1/show.py
-computer_vision/yolo/yolo_v1/yolo_readme_explanation_plots.ipynb
+computer_vision/yolo/yolo_v1/yolo_explanation.ipynb
+computer_vision/yolo/yolo_v1/yolov1_datasets_stats.ipynb
+computer_vision/yolo/yolo_v3/yolov3_datasets_stats.ipynb
+computer_vision/dataset_statistics.ipynb
+computer_vision/dataset_statistics.py
 computer_vision/comparison.py
-computer_vision/comparison_plots/
+computer_vision/yolo/yolov6
 framework_scratch/main.py
 framework_scratch/anim.py
 framework_scratch/evolution.py
@@ -11,3 +14,5 @@ framework_scratch/animation/
 __pycache__/
 *.pth
 *.pickle
+*.onnx
+*.mp4

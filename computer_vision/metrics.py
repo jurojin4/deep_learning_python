@@ -4,18 +4,20 @@ from typing import Dict, List, Literal, Tuple, Union
 import torch
 import torch.nn as nn
 
-eps = 1e-9
-
-def intersection_over_union(bboxes_preds: torch.Tensor, bboxes_gts: torch.Tensor, box_format: Literal["xyxy", "xywh", "xcycwh"] = "xywh") -> torch.Tensor:
+def intersection_over_union(bboxes_preds: torch.Tensor, bboxes_gts: torch.Tensor, is_aligned: bool = True, box_format: Literal["xyxy", "xywh", "xcycwh"] = "xywh") -> torch.Tensor:
     """
     Method that calculates IoU between bounding boxes of predictions and ground_truths.
 
-    :param Tensor **bboxes_preds**: Predictions bounding boxes of shapes (B, 4).
-    :param Tensor **bboxes_gts**: Ground Truths bounding boxes of shapes (B, 4).
+    :param Tensor **bboxes_preds**: Predictions bounding boxes of shapes (B1, 4).
+    :param Tensor **bboxes_gts**: Ground Truths bounding boxes of shapes (B2, 4).
+    :param bool **is_aligned**: Set to `True`, if `True` then B1 and B2 must be equal.
     :param Literal["xyxy", "xywh", "xcycwh"] **box_format**: Format of bounding boxes. Set to `xywh`.
     :return: Intersection over Union of shapes (B, 1).
     :rtype: Tensor
     """
+    if is_aligned:
+        assert bboxes_preds.shape[0] == bboxes_gts.shape[0], f"First dimensions must be equal.\nbboxes_preds.shape[0]: {bboxes_preds.shape[0]}\nbboxes_gts.shape[0]: {bboxes_gts.shape[0]}"
+
     if box_format == "xyxy":
         preds_x1 = bboxes_preds[..., 0:1]
         preds_y1 = bboxes_preds[..., 1:2]
@@ -26,7 +28,6 @@ def intersection_over_union(bboxes_preds: torch.Tensor, bboxes_gts: torch.Tensor
         ground_truths_y1 = bboxes_gts[..., 1:2]
         ground_truths_x2 = bboxes_gts[..., 2:3]
         ground_truths_y2 = bboxes_gts[..., 3:4]
-
     elif box_format == "xywh":
         preds_x1 = bboxes_preds[..., 0:1]
         preds_y1 = bboxes_preds[..., 1:2]
@@ -48,17 +49,27 @@ def intersection_over_union(bboxes_preds: torch.Tensor, bboxes_gts: torch.Tensor
         ground_truths_x2 = bboxes_gts[..., 2:3] + ground_truths_x1
         ground_truths_y2 = bboxes_gts[..., 3:4] + ground_truths_y1
 
-    x1 = torch.max(preds_x1, ground_truths_x1)
-    y1 = torch.max(preds_y1, ground_truths_y1)
-    x2 = torch.min(preds_x2, ground_truths_x2)
-    y2 = torch.min(preds_y2, ground_truths_y2)
+    preds_area = torch.abs((preds_x2 - preds_x1) * (preds_y2 - preds_y1))
+    ground_truths_area = torch.abs((ground_truths_x2 - ground_truths_x1) * (ground_truths_y2 - ground_truths_y1))
 
-    intersection = (x2 - x1).clamp(0) * (y2 - y1).clamp(0)
+    if is_aligned:
+        x1 = torch.max(preds_x1, ground_truths_x1)
+        y1 = torch.max(preds_y1, ground_truths_y1)
+        x2 = torch.min(preds_x2, ground_truths_x2)
+        y2 = torch.min(preds_y2, ground_truths_y2)
 
-    preds_area = abs((preds_x2 - preds_x1) * (preds_y2 - preds_y1))
-    ground_truths_area = abs((ground_truths_x2 - ground_truths_x1) * (ground_truths_y2 - ground_truths_y1))
+        intersection = (x2 - x1).clamp(0) * (y2 - y1).clamp(0)
+        union = (preds_area + ground_truths_area - intersection + 1e-9)
+    else:
+        x1 = torch.max(preds_x1[..., :, None, 0:1], ground_truths_x1[..., None, :, 0:1])
+        y1 = torch.max(preds_y1[..., :, None, 0:1], ground_truths_y1[..., None, :, 0:1])
+        x2 = torch.min(preds_x2[..., :, None, 0:1], ground_truths_x2[..., None, :, 0:1])
+        y2 = torch.min(preds_y2[..., :, None, 0:1], ground_truths_y2[..., None, :, 0:1])
 
-    return intersection / (preds_area + ground_truths_area - intersection + eps)    
+        intersection = (x2 - x1).clamp(0) * (y2 - y1).clamp(0)
+        union = preds_area[..., :, None] + ground_truths_area[..., None, :,  :] - intersection + 1e-9
+
+    return intersection / union
 
 class Metric(nn.Module):
     """
@@ -272,7 +283,6 @@ class Recall(Metric):
         predictions, ground_truths = self._prepare_gts_and_preds(predictions, ground_truths)
 
         recall_per_class = dict([(int(label.item()), None) for label in ground_truths.unique()])
-
         classes_present = ground_truths.unique()
 
         for class_label in classes_present:
@@ -359,7 +369,7 @@ class Mean_Average_Precision(Metric):
     """
     Mean Average Precision metric class.
     """
-    def __init__(self, num_classes: int, batch_size: int, iou_threshold: float = 0.5, detail: bool = False):
+    def __init__(self, num_classes: int, iou_threshold: float = 0.5, detail: bool = False, box_format: Literal["xyxy", "xywh", "xcycwh"] = "xywh"):
         """
         Initializes Mean Average Precision class.
 
@@ -370,10 +380,10 @@ class Mean_Average_Precision(Metric):
         """
         super().__init__()
         super().__setattr__("name", f"mAP@{int(iou_threshold * 100)}")
-        self._num_classes = num_classes
-        self._batch_size = batch_size
+        self._num_classes = num_classes if num_classes > 1 else 1
         self._iou_threshold = iou_threshold
         self.detail = detail
+        self.box_format = box_format
 
     def forward(self, predictions: List[List[List[torch.Tensor]]], ground_truths: List[List[List[torch.Tensor]]]) -> Union[Tuple[Tuple[float, Dict[int, Union[float, None]]], float], float]:
         """
@@ -389,7 +399,7 @@ class Mean_Average_Precision(Metric):
         else:
             return self._forward_nd(predictions, ground_truths)
 
-    def _forward_nd(self, predictions: List[List[List[torch.Tensor]]], ground_truths: List[List[List[torch.Tensor]]]) -> float:
+    def _forward_nd(self, predictions, ground_truths) -> float:
         """
         Method that calculates mAP between predictions and ground_truths.
 
@@ -402,60 +412,61 @@ class Mean_Average_Precision(Metric):
 
         for preds_bboxes, gts_bboxes in zip(predictions, ground_truths):
             if len(gts_bboxes) == 0:
-                print("continue")
+                if len(preds_bboxes) != 0:
+                    mean_average_precision.append(0)
                 continue
             
-            amount_bboxes = Counter([gt[0] for gt in gts_bboxes])
+            amount_bboxes = Counter([torch.tensor(gt_bbox[0]) for gt_bbox in gts_bboxes])
             for key, val in amount_bboxes.items():
                 amount_bboxes[key] = torch.zeros(val)
 
-            if self._num_classes > 1:              
-                preds_bboxes.sort(key=lambda box: box[2], reverse=True)
-            else:
-                preds_bboxes.sort(key=lambda box: box[1], reverse=True)
+            preds_bboxes.sort(key=lambda box: box[1], reverse=True)
 
             true_positive = torch.zeros((len(preds_bboxes)))
             false_positive = torch.zeros((len(preds_bboxes)))
+            
+            if len(preds_bboxes) != 0:
+                ious = intersection_over_union(torch.tensor(preds_bboxes)[..., 2:], torch.tensor(gts_bboxes)[..., 1:], is_aligned=False, box_format=self.box_format)
+                for i in range(ious.shape[0]):
+                    best_iou = 0
+                    results = (ious[i] > self._iou_threshold).int().squeeze(-1)
+                    indices = results.argwhere().tolist()
+                    for indice in indices:
+                        indice = indice[0]
+                        if ious[i][indice] > best_iou:
+                            best_iou = ious[i][indice]
+                            best_gt_idx = indice
 
-            for pred_idx, pred_bbox in enumerate(preds_bboxes):
-                best_iou = 0
-
-                for gt_idx, gt in enumerate(gts_bboxes):
-                    if self._num_classes > 1:
-                        if pred_bbox[1] != gt[1]:
-                            continue
-                    iou = intersection_over_union(pred_bbox[3:], gt[3:]) if self._num_classes > 1 else intersection_over_union(pred_bbox[2:], gt[2:])
-                    if iou > best_iou:
-                        best_iou = iou
-                        best_gt_idx = gt_idx
-
-                if best_iou > self._iou_threshold:
-                    if amount_bboxes[best_gt_idx] == 0:
-                        true_positive[pred_idx] = 1
-                        amount_bboxes[best_gt_idx] = 1
+                    if best_iou > self._iou_threshold:
+                        if amount_bboxes[best_gt_idx] == 0 and preds_bboxes[i][0] == gts_bboxes[best_gt_idx][0]:
+                            true_positive[i] = 1
+                            amount_bboxes[best_gt_idx] = 1
+                        else:
+                            false_positive[i] = 1
                     else:
-                        false_positive[pred_idx] = 1
-                else:
-                    false_positive[pred_idx] = 1
+                        false_positive[i] = 1
 
             true_positive_cumsum = true_positive.cumsum(dim=0)
             false_positive_cumsum = false_positive.cumsum(dim=0)
 
-            recalls = true_positive_cumsum / (len(gts_bboxes) + 1e-16)
-            precisions = true_positive_cumsum / (true_positive_cumsum + false_positive_cumsum + 1e-16)
+            recalls = true_positive_cumsum / len(gts_bboxes)
+            precisions = true_positive_cumsum / (true_positive_cumsum + false_positive_cumsum)
+
+            recalls = torch.cat((torch.tensor([0]), recalls))
+            precisions = torch.cat((torch.tensor([1]), precisions))
 
             mean_average_precision.append(torch.trapz(precisions, recalls).item())
 
         if len(mean_average_precision) != 0:
             mean_average_precision = sum(mean_average_precision) / len(mean_average_precision)
         else:
-            mean_average_precision = 0.
+            mean_average_precision = 1.
 
         return mean_average_precision
 
     def _forward_d(self, predictions: List[List[List[torch.Tensor]]], ground_truths: List[List[List[torch.Tensor]]]) -> Tuple[float, Dict[int, Union[float, None]]]:
         """
-        Method that calculates mAP between predictions and ground_truths.
+        Method that calculates global mAP and class mAP between predictions and ground_truths
 
         :param List[List[List[torch.Tensor]]] **predictions**: Bounding boxes of predictions.
         :param List[List[List[torch.Tensor]]] **ground_truths**: Bounding boxes of ground_truths.
@@ -464,64 +475,70 @@ class Mean_Average_Precision(Metric):
         """
         average_precision_per_class = {}
 
-        for label, (preds_bboxes, gts_bboxes) in enumerate(zip(predictions, ground_truths)):
-            amount_bboxes = Counter([gt[0] for gt in gts_bboxes])
+        for label_idx, (preds_bboxes, gts_bboxes) in enumerate(zip(predictions, ground_truths)):
+            if len(gts_bboxes) == 0:
+                if len(preds_bboxes) != 0:
+                    average_precision_per_class[label_idx] = 0
+                continue
+
+            amount_bboxes = Counter([torch.tensor(gt_bbox[0]) for gt_bbox in gts_bboxes])
             for key, val in amount_bboxes.items():
                 amount_bboxes[key] = torch.zeros(val)
                             
-            if self._num_classes > 1:              
-                preds_bboxes.sort(key=lambda box: box[2], reverse=True)
-            else:
-                preds_bboxes.sort(key=lambda box: box[1], reverse=True)
-            
+            preds_bboxes.sort(key=lambda box: box[1], reverse=True)
+
             true_positive = torch.zeros((len(preds_bboxes)))
             false_positive = torch.zeros((len(preds_bboxes)))
-            total_gt_bboxes = len(gts_bboxes)     
+            
+            if len(preds_bboxes) != 0:
+                ious = intersection_over_union(torch.tensor(preds_bboxes)[..., 2:], torch.tensor(gts_bboxes)[..., 1:], is_aligned=False, box_format=self.box_format)
+                for i in range(ious.shape[0]):
+                    best_iou = 0
+                    results = (ious[i] > self._iou_threshold).int().squeeze(-1)
+                    indices = results.argwhere().tolist()
+                    for indice in indices:
+                        indice = indice[0]
+                        if ious[i][indice] > best_iou:
+                            best_iou = ious[i][indice]
+                            best_gt_idx = indice
 
-            if total_gt_bboxes == 0:
-                continue
-
-            for pred_idx, pred_bbox in enumerate(preds_bboxes):
-                best_iou = 0
-
-                for gt_idx, gt in enumerate(gts_bboxes):
-                    if self._num_classes > 1:
-                        if pred_bbox[1] != gt[1]:
-                            continue
-                    iou = intersection_over_union(pred_bbox[3:], gt[3:]) if self._num_classes > 1 else intersection_over_union(pred_bbox[2:], gt[2:])
-                    if iou > best_iou:
-                        best_iou = iou
-                        best_gt_idx = gt_idx
-
-                if best_iou > self._iou_threshold:
-                    if amount_bboxes[best_gt_idx] == 0:
-                        true_positive[pred_idx] = 1
-                        amount_bboxes[best_gt_idx] = 1
+                    if best_iou > self._iou_threshold:
+                        if amount_bboxes[best_gt_idx] == 0 and preds_bboxes[i][0] == gts_bboxes[best_gt_idx][0]:
+                            true_positive[i] = 1
+                            amount_bboxes[best_gt_idx] = 1
+                        else:
+                            false_positive[i] = 1
                     else:
-                        false_positive[pred_idx] = 1
-                else:
-                    false_positive[pred_idx] = 1
+                        false_positive[i] = 1
 
             true_positive_cumsum = true_positive.cumsum(dim=0)
             false_positive_cumsum = false_positive.cumsum(dim=0)
 
-            recalls = true_positive_cumsum / (total_gt_bboxes + 1e-9)
-            precisions = true_positive_cumsum / (true_positive_cumsum + false_positive_cumsum + 1e-9)
+            recalls = true_positive_cumsum / (len(gts_bboxes))
+            precisions = true_positive_cumsum / (true_positive_cumsum + false_positive_cumsum)
 
-            if label in average_precision_per_class.keys():
-                average_precision_per_class[label].append(torch.trapz(precisions, recalls).item())
-            else:
-                average_precision_per_class[label] = [torch.trapz(precisions, recalls).item()]
-            
-            if label in average_precision_per_class.keys():
-                if average_precision_per_class[label] != 0:
-                    average_precision_per_class[label] = sum(average_precision_per_class[label]) / len(average_precision_per_class[label])
-                else:
-                    average_precision_per_class[label] = 0
+            recalls = torch.cat((torch.tensor([0]), recalls))
+            precisions = torch.cat((torch.tensor([1]), precisions))
+
+            average_precision_per_class[label_idx] = torch.trapz(precisions, recalls).item()
 
         if len(average_precision_per_class) != 0:
             mean_average_precision = sum([item for _, item in average_precision_per_class.items()]) / len(average_precision_per_class)
         else:
-            mean_average_precision = 0.
+            mean_average_precision = 1.
 
         return mean_average_precision, average_precision_per_class
+    
+if __name__ == "__main__":
+    from random import randint, random
+    import os
+    os.system("clear")
+    num_classes = 1
+    batch_size = 32
+    mAP = Mean_Average_Precision(num_classes, batch_size, iou_threshold=0.5, detail=True)
+    for _ in range(1):
+        predictions = [[[0, 0.55, 0.55, 0.55, 0.14, 0.42], [10, 0.75, 0.53, 0.25, 0.15, 0.1], [15, 0.75, 0.15, 0.5, 0.104, 0.39]]]
+        ground_truths = [[[0, 0.55, 0.55, 0.14, 0.4], [10, 0.23, 0.15, 0.44, 0.15], [15, 0.35, 0.45, 0.14, 0.39]]]
+        print(predictions, end="\n\n")
+        print(ground_truths)
+        print(mAP(predictions, ground_truths))

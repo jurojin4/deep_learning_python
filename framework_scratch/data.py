@@ -1,4 +1,5 @@
 from typing import Literal
+from random import randint
 from module import Activation_Module
 from typing import Any, Dict, List, Tuple, Union
 from sklearn.datasets import make_blobs, make_classification, make_circles, make_regression
@@ -55,6 +56,14 @@ def choose_dataset(dataset_type: Literal["blobs", "classification", "circles", "
 
     if dataset_type == "blobs":
         X, Y = make_blobs(n_samples=n_samples, n_features=n_features, centers=classes, random_state=random_state)
+        for i in range(n_features):
+            rd = randint(0, 2)
+            if rd == 0:
+                X[..., i] = ts.cos(X[..., i])
+            elif rd == 1:
+                X[..., i] = ts.sin(X[..., i])
+            else:
+                X[..., i] = ts.cos(X[..., i]) + ts.sin(X[..., i])
         X = normalization(X)
     elif dataset_type == "classification":
         X, Y = make_classification(n_samples=n_samples, n_features=n_features, n_classes=classes, n_clusters_per_class=n_clusters_per_class)

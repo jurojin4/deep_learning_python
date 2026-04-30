@@ -488,6 +488,22 @@ class random:
 
 # Trigonometry Functions
 
+def cos(X: Union[Tensor, np.ndarray]):
+    if isinstance(X, Tensor):
+        Y = Tensor(np.cos(X.tensor), parents=[X], requires_grad=X.requires_grad)
+
+        if Y.requires_grad:
+            def _backward():
+                X.grad -= np.sin(X.tensor) * Y.grad
+
+            Y._backward = _backward
+
+        return Y
+    elif isinstance(X, np.ndarray):
+        return np.cos(X)
+    else:
+        return NotImplemented
+
 def sin(X: Union[Tensor, np.ndarray]):
     if isinstance(X, Tensor):
         Y = Tensor(np.sin(X.tensor), parents=[X], requires_grad=X.requires_grad)

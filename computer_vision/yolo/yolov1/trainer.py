@@ -1,10 +1,10 @@
 from .yolov1 import YOLOV1
 from .loss import YOLOV1Loss
-from .yolo_tools import get_bboxes
-from torch.utils.data import Dataset, DataLoader
-from .prepare_dataset import Compose, YOLOV1Dataset
-from typing import List, Tuple, Union
 from ...trainer import Trainer
+from .yolo_tools import get_bboxes
+from typing import List, Literal, Tuple, Union
+from torch.utils.data import DataLoader
+from .prepare_dataset import Compose, YOLOV1Dataset, collate_fn
 
 import os
 import torch
@@ -12,15 +12,83 @@ import torch.nn as nn
 import torch.optim as optim
 import torchvision.transforms as transforms
 
-dirname = os.path.dirname(__file__)
-
 class YOLOV1Trainer(Trainer):
     """
-    Class that train YOLOV1 model.
+    Trainer class for YOLOV1 model.
     """
-    def __init__(self, dataset_name, dataset_path, epochs, size, batch_size, learning_rate = 0.00001, milestones = None, detail= False, no_measure = False, save = False, save_metric = "loss", box_format ="xywh", delete = False, weights_path = None, load_all = False, experiment_name = None, no_verbose = False):
-        super().__init__(dataset_name, dataset_path, epochs, size, batch_size, learning_rate, milestones, detail, no_measure, save, save_metric, box_format, delete, weights_path, load_all, experiment_name, no_verbose)
+    def __init__(self, dataset_name, dataset_path, epochs, image_size, batch_size, warmup_epoch = 1, learning_rate = 0.00001, milestones = None, detail = False, no_measure = False, save = False, save_metric = "loss", box_format = "xywh", data_aug = False, delete = False, weights_path = None, load_all = False, experiment_name = None, no_verbose = False):
+        assert isinstance(weights_path, str) or weights_path == None, f"weights_path has to be a {str} instance or equals to {None}, not {type(weights_path)}."
         self._batch_size = batch_size
+        self._train_loader, self._validation_loader = self._define_model_dataloader(dataset_name=dataset_name, dataset_path=dataset_path, image_size=image_size, box_format=box_format, data_aug=data_aug)
+        super().__init__(dataset_name, dataset_path, epochs, image_size, batch_size, warmup_epoch, learning_rate, milestones, detail, no_measure, save, save_metric, box_format, data_aug, delete, weights_path, load_all, experiment_name, no_verbose)
+
+    def _define_model_dataloader(self, dataset_name: str, dataset_path: str, image_size: Union[int, Tuple[int, int]], box_format: Literal["xyxy", "xywh", "xcycwh"] = "xywh", data_aug: bool = False):
+        """
+        Method that defines the dataloaders for training set and validation set.
+
+        :param Dataset **train**: Training set.
+        :param Dataset **validation**: Validation set.
+
+        :return: DataLoaders for training set and validation set.
+        :rtype: Tuple[DataLoader, DataLoader]
+        """
+        transformations = Compose([transforms.ToTensor()])
+
+        trainset = YOLOV1Dataset(dataset_name=dataset_name,
+                                 dataset_path=dataset_path, 
+                                 S=7,
+                                 B=2, 
+                                 width=image_size[1],
+                                 height=image_size[0],
+                                 transformations=transformations,
+                                 model_normalized=True,
+                                 box_format=box_format,
+                                 type_set="train",
+                                 data_aug=data_aug)
+        
+        self._weights, self._num_classes, self._categories, self._dataset_name, self._mode = trainset.weights, trainset.num_classes, trainset.categories, trainset.dataset_name, trainset.mode
+
+        validationset = YOLOV1Dataset(dataset_name=dataset_name,
+                                 dataset_path=dataset_path, 
+                                 S=7,
+                                 B=2, 
+                                 width=image_size[1],
+                                 height=image_size[0],
+                                 transformations=transformations,
+                                 model_normalized=True,
+                                 box_format=box_format,
+                                 type_set="validation")    
+        
+        if self._mode == "classification":
+            train_loader = DataLoader(dataset=trainset,
+                                    batch_size=self._batch_size,
+                                    shuffle=True,
+                                    num_workers=os.cpu_count(),
+                                    pin_memory=True,
+                                    drop_last=True)            
+            validation_loader = DataLoader(dataset=validationset,
+                                    batch_size=self._batch_size,
+                                    shuffle=True,
+                                    num_workers=os.cpu_count(),
+                                    pin_memory=True,
+                                    drop_last=True)
+        else:
+            train_loader = DataLoader(dataset=trainset,
+                                    batch_size=self._batch_size,
+                                    shuffle=True,
+                                    num_workers=os.cpu_count(),
+                                    pin_memory=True,
+                                    drop_last=True,
+                                    collate_fn=collate_fn)
+            
+            validation_loader = DataLoader(dataset=validationset,
+                                    batch_size=self._batch_size,
+                                    shuffle=True,
+                                    num_workers=os.cpu_count(),
+                                    pin_memory=True,
+                                    drop_last=True,
+                                    collate_fn=collate_fn)
+        return train_loader, validation_loader
 
     def _define_model(self) -> YOLOV1:
         """
@@ -29,16 +97,11 @@ class YOLOV1Trainer(Trainer):
         :return: YOLOV1 model.
         :rtype YOLOV1
         """
-        if isinstance(self._size, tuple):
-            model = YOLOV1(in_channels=3, img_size=self._size[0], num_classes=self._num_classes, B=2, batch_normalization=True, mode=self._mode)
-        else:
-            model = YOLOV1(in_channels=3, img_size=self._size, num_classes=self._num_classes, B=2, batch_normalization=True, mode=self._mode)
+        model = YOLOV1(in_channels=3, image_width=self._image_size[0], image_height=self._image_size[1], num_classes=self._num_classes, B=2, mode=self._mode)
 
         if self._weights_path is not None:
             model.load(self._weights_path, self._load_all)
-
-        model.to("cuda" if torch.cuda.is_available() else "cpu")
-        print(f"Model parameters: {sum([p.numel() for p in model.parameters() if p.requires_grad])}")
+            
         return model
 
     def _define_loss(self):
@@ -75,37 +138,6 @@ class YOLOV1Trainer(Trainer):
         """
         self._dirname = os.path.dirname(__file__)
     
-    def _define_model_dataloader(self, train: Dataset, validation: Dataset) -> Tuple[DataLoader, DataLoader]:
-        """
-        Method that defines the dataloaders for training set and validation set.
-
-        :param Dataset **train**: Training set.
-        :param Dataset **validation**: Validation set.
-
-        :return: DataLoaders for training set and validation set.
-        :rtype: Tuple[DataLoader, DataLoader]
-        """
-        compose = Compose([transforms.Resize(self._size), transforms.ToTensor()])
-
-        train_dataset = YOLOV1Dataset(dataset=train, num_classes=self._model.num_classes, S=self._model.S, B=self._model.B, mode=self._mode, compose=compose)
-
-        train_loader = DataLoader(dataset=train_dataset,
-                                batch_size=self._batch_size,
-                                shuffle=True,
-                                num_workers=os.cpu_count(),
-                                pin_memory=True,
-                                drop_last=True)
-        
-        validation_dataset = YOLOV1Dataset(dataset=validation, num_classes=self._model.num_classes, S=self._model.S, B=self._model.B, mode=self._mode, compose=compose)
-        validation_loader = DataLoader(dataset=validation_dataset,
-                                batch_size=self._batch_size,
-                                shuffle=True,
-                                num_workers=os.cpu_count(),
-                                pin_memory=True,
-                                drop_last=True)
-        
-        return train_loader, validation_loader
-    
     def _model_tools(self, predictions: torch.Tensor, ground_truths: torch.Tensor) -> Tuple[List[List[float | int]], List[List[float | int]]]:
         """
         Method that transforms and reshapes predictions and ground_truths in order to be measure.
@@ -115,4 +147,4 @@ class YOLOV1Trainer(Trainer):
         :return: Predictions and ground truths sorted according confidence threshold and IoU overlap threshold.
         :rtype: Tuple[List[List[float | int]], List[List[float | int]]]
         """
-        return get_bboxes(self._model.S, self._model.B, self._model.num_classes, predictions=predictions, ground_truths=ground_truths, iou_threshold=self._iou_threshold_overlap, confidence_threshold=self._confidence_threshold)
+        return get_bboxes(predictions=predictions, ground_truths=ground_truths, S=self._model.S, B=self._model.B, num_classes=self._model.num_classes, iou_threshold=self._iou_threshold_overlap, confidence_threshold=self._confidence_threshold)
