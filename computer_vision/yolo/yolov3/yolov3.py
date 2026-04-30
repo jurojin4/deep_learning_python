@@ -1,5 +1,5 @@
 from math import floor
-from typing import List, Literal
+from typing import List, Literal, Tuple
 from ...modules import ConvBlock, ResBlock
 
 import os
@@ -64,8 +64,8 @@ class ScalePrediction(nn.Module):
         assert isinstance(num_classes, int), f"num_classes has to be an {int} instance, not {type(num_classes)}."
         super().__init__()
 
-        self._head = nn.Sequential(ConvBlock(in_channels, 2 * in_channels, kernel_size=3, stride=1, padding=1, batch_normalization=True),
-                                    ConvBlock(2 * in_channels, (num_classes + 5) * 3, kernel_size=1, stride=1, padding=0, batch_normalization=False, activation_function=False))
+        self._head = nn.Sequential(ConvBlock(in_channels, 2 * in_channels, kernel_size=3, stride=1, padding=1, batch_normalization=True, activation_function="leakyrelu"),
+                                    ConvBlock(2 * in_channels, (num_classes + 5) * 3, kernel_size=1, stride=1, padding=0, batch_normalization=False, activation_function=None))
         self._num_classes = num_classes
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -82,26 +82,28 @@ class YOLOV3(nn.Module):
     """
     YOLOV3 class.
     """
-    def __init__(self, in_channels: int, num_classes: int, img_size: int, batch_normalization: bool = False, mode: Literal["classification", "object_detection"] = "object_detection"):
+    def __init__(self, in_channels: int, num_classes: int, image_height: int, image_width: int,  mode: Literal["classification", "object_detection"] = "object_detection"):
         """
         Initializes the YOLOV3 class.
 
         :param int **in_channels**: Number that represents the size of the first dimension for a 3D object in torch.
         :param int **num_classes**: Number of classes.
-        :param int **img_size**: Size of the input image of dimension (Batch, Size, Size, 3).
+        :param int **img_height**: Image height.
+        :param int **img_width**: Image width.
         :param bool **batch_normalization**: Set to `False`, if `True` then a batch normalization layer is added to the convolutional block.
         :param Literal["classification", "object_detection"] **mode**: String that defines the model mode. Set to `object_detection`.
         """
         assert isinstance(in_channels, int), f"in_channels has to be an {int} instance, not {type(in_channels)}."
         assert isinstance(num_classes, int), f"num_classes has to be an {int} instance, not {type(num_classes)}."
-        assert isinstance(batch_normalization, bool), f"batch_normalization has to be an {bool} instance, not {type(batch_normalization)}."
-        assert isinstance(mode, str) and mode in ["classification", "object_detection"], f"mode has to be a {str} instance and in the given list:\n[\"classification\", \"object_detection\"]"
+        assert isinstance(image_height, int), f"image_height has to be an {int} instance, not {type(image_height)}."
+        assert isinstance(image_width, int), f"image_width has to be an {int} instance, not {type(image_width)}."
+        assert mode in ["classification", "object_detection"], f"mode has to be a {str} instance and in the given list:\n[\"classification\", \"object_detection\"]"
         super().__init__()
 
         self._in_channels = in_channels
-        self._num_classes = num_classes if num_classes not in [0, 1] else 0
-        self._img_size = img_size
-        self._batch_normalization = batch_normalization
+        self._num_classes = num_classes if num_classes > 1 else 0
+        self._image_height = image_height
+        self._image_width = image_width
         self.mode = mode
         self._darknet = self._build_network(mode)
         
@@ -120,18 +122,18 @@ class YOLOV3(nn.Module):
         for block in architecture:
             if len(block) == 4:
                 out_channels, kernel_size, stride, padding = block
-                network.append(ConvBlock(self._in_channels, out_channels, kernel_size, stride, padding, self._batch_normalization))
+                network.append(ConvBlock(self._in_channels, out_channels, kernel_size, stride, padding, True, activation_function="leakyrelu"))
                 self._in_channels = out_channels
-                self._img_size = self._size_image(self._img_size, kernel=kernel_size, stride=stride, padding=padding)
+                self._image_height, self._image_width = self._image_size(self._image_height, self._image_width, kernel=kernel_size, stride=stride, padding=padding)
 
             elif len(block) == 2:
                 repetition = block[1]
-                network.append(ResBlock(self._in_channels, repetition, self._batch_normalization))
+                network.append(ResBlock(self._in_channels, repetition, True))
 
             elif len(block) == 1:
                 if block[0] == "ScalePrediction":
-                    network += [ResBlock(self._in_channels, 1, self._batch_normalization, False),
-                                    ConvBlock(self._in_channels, self._in_channels // 2, kernel_size=1, stride=1, padding=0, batch_normalization=self._batch_normalization),
+                    network += [ResBlock(self._in_channels, 1, True, False),
+                                    ConvBlock(self._in_channels, self._in_channels // 2, kernel_size=1, stride=1, padding=0, batch_normalization=True, activation_function="leakyrelu"),
                                     ScalePrediction(self._in_channels // 2, self._num_classes)]
                     self._in_channels //= 2
                 elif block[0] == "Upsample":
@@ -145,17 +147,19 @@ class YOLOV3(nn.Module):
 
         return network
     
-    def _size_image(self, size: int, kernel: int, stride: int, padding: int) -> int:
+    def _image_size(self, height: int, width: int, kernel: int, stride: int, padding: int) -> Tuple[int, int]:
         """
         Method that calculates the 3D size image according height and width.
 
+        :param int **height**: Height of the image.
+        :param int **width**: Width of the image.
         :param int **kernel**: Size of the convolution kernel.
         :param int **stride**: Size of the convolution stride.
         :param int **padding**: Size of the convolution padding.
-        :return: Image size after the convolution.
-        :rtype: int
+        :return: Image size after the convolution in this form (height, width).
+        :rtype: Tuple[int, int]
         """
-        return floor((size + 2 * padding - kernel) / stride) + 1
+        return floor((height + 2 * padding - kernel) / stride) + 1, floor((width + 2 * padding - kernel) / stride) + 1
     
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
@@ -231,6 +235,7 @@ class YOLOV3(nn.Module):
         :param str **weights_path**: Path of the saved weights.
         :param bool **all**: Boolean that allows loading either all weights or only the convolution weights. Set to `False`.
         """
+        self.eval()
         if all:
             self.load_state_dict(torch.load(weights_path, map_location=next(self.parameters()).device))
             print("Model load completely.")

@@ -4,8 +4,6 @@ from ...metrics import intersection_over_union
 import torch
 import torch.nn as nn
 
-# (batch, boxes_prior, Sh, Sw, num_classes + 5)
-
 class YOLOV3Loss(nn.Module):
     """
     YOLOV3 Loss class.
@@ -60,7 +58,7 @@ class YOLOV3Loss(nn.Module):
         preds = predictions.clone()
         tars = targets.clone()
         preds[..., 1:3] = self._sigmoid(preds[..., 1:3])
-        tars[..., 3:5] = torch.log(1e-16 + (tars[..., 3:5] / bboxes_prior_on_scale))
+        tars[..., 3:5] = torch.log(1e-15 + (tars[..., 3:5] / bboxes_prior_on_scale))
         box_loss = self._mse(preds[..., 1:5][ind_obj], tars[..., 1:5][ind_obj])
 
         if self.num_classes > 1:

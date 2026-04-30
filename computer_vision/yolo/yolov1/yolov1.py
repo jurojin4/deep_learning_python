@@ -1,6 +1,6 @@
 from math import floor
-from typing import Literal
 from ...modules import ConvBlock
+from typing import Literal, Tuple
 
 import os
 import torch
@@ -31,18 +31,20 @@ class Darknet(nn.Module):
     """
     Darknet class.\n\nBackbone of the YOLOV1 model.
     """
-    def __init__(self, in_channels: int, img_size: int, batch_normalization: bool = False, bias: bool = True):
+    def __init__(self, in_channels: int, image_height: int, image_width: int, bias: bool = True):
         """
         Initializes the Darknet class.
 
         :param int **in_channels**: Number that represents the size of the first dimension for a 3D object in torch.
-        :param int **img_size**: Size of the input image of dimension (batch, size, size, 3).
-        :param bool **batch_normalization**: Set to `False`, if `True` then a batch normalization layer is added to the convolutional block.
+        :param int **image_height**: Height of the image.
+        :param int **image_width**: Width of the image.
         :param bool **bias**: Set to `True`, adds bias to the weighted sum before applying the activation function.
         """
         super().__init__()
-        self._img_size = img_size
-        self._backbone = self._create_backbone(in_channels=in_channels, batch_normalization=batch_normalization, bias=bias)
+        self.image_height = image_height
+        self.image_width = image_width
+
+        self._backbone = self._create_backbone(in_channels=in_channels, bias=bias)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
@@ -54,12 +56,11 @@ class Darknet(nn.Module):
         """
         return self._backbone(x)
         
-    def _create_backbone(self, in_channels: int, batch_normalization: bool = False, bias: bool = True) -> nn.Sequential:
+    def _create_backbone(self, in_channels: int, bias: bool = True) -> nn.Sequential:
         """
         Method that creates the darknet network.
 
         :param int **in_channels**: Number that represents the size of the first dimension for a 3D object in torch.
-        :param bool **batch_normalization**: Set to `False`, if `True` then a batch normalization layer is added to the convolutional block.
         :param bool **bias**: Set to `True`, adds bias to the weighted sum before applying the activation function.
         :return: Darknet network.
         :rtype: Sequential
@@ -67,47 +68,50 @@ class Darknet(nn.Module):
         sequential = []
         for block in darknet_architecture:
             if isinstance(block, tuple):
-                sequential.append(ConvBlock(in_channels=in_channels, out_channels=block[0], kernel_size=block[1], stride=block[2], padding=block[3], batch_normalization=batch_normalization, bias=bias))
-                self._img_size = self._size_image(self._img_size, kernel=block[1], stride=block[2], padding=block[3])
+                sequential.append(ConvBlock(in_channels=in_channels, out_channels=block[0], kernel_size=block[1], stride=block[2], padding=block[3], batch_normalization=True, activation_function="leakyrelu", bias=bias))
+                self.image_height, self.image_width = self._image_size(self.image_height, self.image_width, kernel=block[1], stride=block[2], padding=block[3])
             
             if isinstance(block, str):
                 if block == "maxpooling":
                     sequential.append(nn.MaxPool2d(2, 2))
-                    self._img_size = self._size_image(self._img_size, kernel=2, stride=2, padding=0)
+                    self.image_height, self.image_width = self._image_size(self.image_height, self.image_width, kernel=2, stride=2, padding=0)
                     continue
 
             if isinstance(block, list):
                 for b in block:
-                    sequential.append(ConvBlock(in_channels=in_channels, out_channels=b[0], kernel_size=b[1], stride=b[2], padding=b[3], batch_normalization=batch_normalization, bias=bias))
+                    sequential.append(ConvBlock(in_channels=in_channels, out_channels=b[0], kernel_size=b[1], stride=b[2], padding=b[3], batch_normalization=True, activation_function="leakyrelu", bias=bias))
                     in_channels = b[0]
-                    self._img_size = self._size_image(self._img_size, kernel=b[1], stride=b[2], padding=b[3])
+                    self.image_height, self.image_width = self._image_size(self.image_height, self.image_width, kernel=b[1], stride=b[2], padding=b[3])
 
                 continue
 
             in_channels = block[0]
         return nn.Sequential(*sequential)
     
-    def _size_image(self, size: int, kernel: int, stride: int, padding: int) -> int:
+    def _image_size(self, height: int, width: int, kernel: int, stride: int, padding: int) -> Tuple[int, int]:
         """
         Method that calculates the 3D size image according height and width.
 
+        :param int **height**: Height of the image.
+        :param int **width**: Width of the image.
         :param int **kernel**: Size of the convolution kernel.
         :param int **stride**: Size of the convolution stride.
         :param int **padding**: Size of the convolution padding.
-        :return: Image size after the convolution.
-        :rtype: int
+        :return: Image size after the convolution in this form (height, width).
+        :rtype: Tuple[int, int]
         """
-        return floor((size + 2 * padding - kernel) / stride) + 1
+        return floor((height + 2 * padding - kernel) / stride) + 1, floor((width + 2 * padding - kernel) / stride) + 1
 
 class Head(nn.Module):
     """
     YOLOV1 Head class.
     """
-    def __init__(self, size: int, num_classes: int, S: int, B: int, mode: Literal["classification", "object_detection"]):
+    def __init__(self, image_height: int, image_width: int, num_classes: int, S: int, B: int, mode: Literal["classification", "object_detection"]):
         """
         Initializes the Head class.
 
-        :param int **size**: Image size after the forward darknet network.
+        :param int **image_height**: Height of the image.
+        :param int **image_width**: Width of the image.
         :param int **num_classes**: Number of classes to predict.
         :param int **S**: Cells number along height and width.
         :param int **B**: Bounding boxes number in each cell.
@@ -116,8 +120,8 @@ class Head(nn.Module):
         super().__init__()
         self._S = S
         self._B = B
-        self._num_classes = num_classes
-        self._head = self._create_head(size=size, mode=mode)
+        self._num_classes = num_classes if num_classes > 1 else 0
+        self._head = self._create_head(image_height, image_width, mode=mode)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
@@ -129,9 +133,12 @@ class Head(nn.Module):
         """
         return self._head(x)
     
-    def _create_head(self, size: int, mode: Literal["classification", "object_detection"]) -> nn.Sequential:
+    def _create_head(self, image_height: int, image_width: int, mode: Literal["classification", "object_detection"]) -> nn.Sequential:
         """
-        :param int **size**: Image size after the forward darknet network.
+        Method that creates YOLOV1 head.
+
+        :param int **image_height**: Height of the image.
+        :param int **image_width**: Width of the image.
         :param Literal["classification", "object_detection"] **mode**: String that defines the model mode.
         :return: Head network.
         :rtype: Sequential
@@ -139,7 +146,7 @@ class Head(nn.Module):
         if mode == "classification":
             return nn.Sequential(
                 *[nn.Flatten(),
-                nn.Linear(1024 * size * size, 4096),
+                nn.Linear(1024 * image_height * image_width, 4096),
                 nn.Dropout(0.5),
                 nn.LeakyReLU(0.1),
                 nn.Linear(4096, self._num_classes),
@@ -147,7 +154,7 @@ class Head(nn.Module):
         else:
             return nn.Sequential(
                 *[nn.Flatten(),
-                nn.Linear(1024 * size * size, 4096),
+                nn.Linear(1024 * image_height * image_width, 4096),
                 nn.Dropout(0.5),
                 nn.LeakyReLU(0.1),
                 nn.Linear(4096, self._S * self._S * (self._num_classes + (self._B * 5)))])
@@ -156,26 +163,27 @@ class YOLOV1(nn.Module):
     """
     YOLOV1 class.
     """
-    def __init__(self, in_channels: int, img_size: int, num_classes: int, S: int = 7, B: int = 2, batch_normalization: bool = False, bias: bool = True, mode: Literal["classification", "object_detection"] = "object_detection"):
+    def __init__(self, in_channels: int, image_height: int, image_width: int, num_classes: int, S: int = 7, B: int = 2, bias: bool = True, mode: Literal["classification", "object_detection"] = "object_detection"):
         """
         Initializes the YOLOV1 class.
 
         :param int **in_channels**: Number that represents the size of the first dimension for a 3D object in torch.
-        :param int **img_size**: Size of the input image of dimension (Batch, Size, Size, 3).
+        :param int **image_height**: Height of the image.
+        :param int **image_width**: Width of the image.
         :param int **num_classes**: Number of classes to predict.
         :param int **S**: Cells number along height and width. Set to `7`.
         :param int **B**: Bounding boxes number in each cell. Set to `2`.
-        :param bool **batch_normalization**: Set to `False`, if `True` then a batch normalization layer is added to the convolutional block.
         :param bool **bias**: Set to `True`, adds bias to the weighted sum before applying the activation function.
         :param Literal["classification", "object_detection"] **mode**: String that defines the model mode. Set to `object_detection`.
         """
         assert isinstance(in_channels, int), f"in_channels has to be an {int} instance, not {type(in_channels)}."
-        assert isinstance(img_size, int), f"img_size has to be an {int} instance, not {type(img_size)}."
-        assert isinstance(batch_normalization, bool), f"batch_normalization has to be a {bool} instance, not {type(batch_normalization)}."
+        assert isinstance(image_height, int), f"image_height has to be an {int} instance, not {type(image_height)}."
+        assert isinstance(image_width, int), f"image_width has to be an {int} instance, not {type(image_width)}."
+        assert isinstance(num_classes, int), f"num_classes has to be an {int} instance, not {type(num_classes)}."
         assert isinstance(bias, bool), f"bias has to be a {bool} instance, not {type(bias)}."
         assert isinstance(mode, str) and mode in ["classification", "object_detection"], f"mode has to be a {str} instance and in the given list:\n[\"classification\", \"object_detection\"]"
         super().__init__()
-        self._backbone = Darknet(in_channels=in_channels, img_size=img_size, batch_normalization=batch_normalization, bias=bias)
+        self._backbone = Darknet(in_channels=in_channels, image_width=image_width, image_height=image_height, bias=bias)
 
         if mode == "classification":
             self.S = None
@@ -185,7 +193,7 @@ class YOLOV1(nn.Module):
             self.B = B
         self.num_classes = num_classes if num_classes > 1 else 0
 
-        self._head = Head(self._backbone._img_size, num_classes=num_classes, S=self.S, B=self.B, mode=mode)
+        self._head = Head(self._backbone.image_height, self._backbone.image_height, num_classes=self.num_classes, S=self.S, B=self.B, mode=mode)
         self._mode = mode
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -222,6 +230,7 @@ class YOLOV1(nn.Module):
         :param str **weights_path**: Path of the saved weights.
         :param bool **all**: Boolean that allows loading either all weights or only the convolution weights. Set to `False`.
         """
+        self.eval()
         if all:
             self.load_state_dict(torch.load(weights_path, map_location=next(self.parameters()).device))
             print("Model load completely.")

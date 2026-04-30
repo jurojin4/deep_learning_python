@@ -1,7 +1,18 @@
 # Change Log
 All notable changes to this repository will be documented in this file.
 
-## 2026-03-02 YOLOV3 Implementation
+## 2026-04-30 - Embellishment
+
+### Added
+- Data Augmentation
+- Video Generation
+- Data Parallelism
+
+### Fixed
+- Mean Average Precision corrected
+
+
+## 2026-03-02 - YOLOV3 Implementation
 
 ### Added
 - YOLOV3 implementation

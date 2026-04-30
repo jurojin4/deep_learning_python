@@ -1,38 +1,13 @@
-from PIL import Image
-from typing import Callable, Dict, List, Literal, Tuple, Union
-from torch.utils.data import Dataset
+from ...datasets import Compose, Dataset
+from typing import Any, List, Literal, Tuple, Union
 
 import torch
-import numpy as np
-
-class Compose(object):
-    """
-    Compose class.
-    """
-    def __init__(self, transforms: List[Callable]):
-        """
-        Initializes the Compose class.
-        
-        :param List[Callable] **transforms**: Transformations to apply to objects (images)."""
-        self.transforms = transforms
-
-    def __call__(self, image: Union[np.ndarray, Image.Image]):
-        """
-        Built-in Python method that allows to call an instance of the class. Applies the transformations.
-        
-        :param Union[np.ndarray, Image.Image] **image**:
-        :return: Image transformed.
-        :rtype: ArrayLike
-        """
-        for t in self.transforms:
-            image = t(image)
-        return image
 
 class YOLOV1Dataset(Dataset):
     """
     YOLOV1Dataset class.
     """
-    def __init__(self, dataset: Union[Dict[str, List[np.ndarray]], Dict[str, List[int]], Tuple[Dict[str, Dict[str, np.ndarray]], Dict[str, Dict[str, Union[List[int], List[List[int]]]]], Dict[str, Dict[str, Union[int, List[int]]]]]], num_classes: int, S: int = 7, B: int = 2, mode: Literal["classification", "object_detection"] = "object_detection", box_format: Literal["xyxy", "xywh", "xcycwh"] = "xywh", compose: Union[Compose, None] = None):
+    def __init__(self, dataset_name: str, dataset_path: str, S: int, B: int, height: int, width: int, transformations: Compose, box_format: Literal["xyxy", "xywh", "xcycwh"] = "xywh", model_normalized: bool = True, type_set: Literal["train", "validation"] = "train", data_aug: bool = False, **kwargs):
         """
         Initializes the YOLOV1Dataset class.
 
@@ -40,42 +15,31 @@ class YOLOV1Dataset(Dataset):
         :param int **num_classes**: Number of classes to predict.
         :param int **S**: Cells number along height and width.
         :param int **B**: Bounding boxes number in each cell.
-        :param Literal["classification", "object_detection"] **mode**: String that defines the model mode. Set to `object_detection`.
+        :param int **height**: Height of the image.
+        :param int **width**: Width of the image.
+        :param Compose **transformations**: Tool transforming images.
         :param Literal["xyxy", "xywh", "xcycwh"] **box_format**: Format of bounding boxes. Set to `xywh`.
-        :param Union[Compose, None] **compose**: Tool transforming images. Set to `None`.
+        :param bool **model_normalized**: Boolean that indicates if outputs are normalized between 0 and 1.
+        :param Literal["train", "validation"] **type_set**: Set to `train`.
+        :param bool **data_aug**: Boolean that allows data augmentation. Set to `False`.
         """
-        assert isinstance(mode, str) and mode in ["classification", "object_detection"], f"mode has to be a {str} instance and in the given list:\n[\"classification\", \"object_detection\"]"
+        assert isinstance(S, int), f"S has to be an {int} instance, not {type(S)}."
+        assert isinstance(B, int), f"B has to be an {int} instance, not {type(B)}."
+        assert isinstance(height, int), f"height has to be an {int} instance, not {type(height)}."
+        assert isinstance(width, int), f"width has to be an {int} instance, not {type(width)}."
+        assert isinstance(transformations, Compose), f"transformations has to be a {Compose} instance (or None), not {type(transformations)}."
         assert box_format in ["xyxy", "xywh", "xcycwh"], f'box_format has to be in ["xyxy", "xywh", "xcycwh"], not equal to {box_format}.'
-        assert isinstance(compose, Compose) or compose == None, f"compose has to be a {Compose} instance (or None), not {type(compose)}."
-        super().__init__()
-        self.num_classes = num_classes
-        self._mode = mode
-        self._box_format = box_format
-        self._compose = compose
+        super().__init__(dataset_name, dataset_path, width, height, transformations, box_format, model_normalized, type_set, data_aug, **kwargs)
 
-        if mode == "classification":
-            self._images = dataset["images"]
-            self._labels = dataset["labels"]
+        if self.mode == "classification":
             self.S = None
             self.B = None
         else:
-            self._images = dataset["images"]
-            self._bboxes = dataset["bboxes"]
-            self._labels = dataset["labels"]
             self.S = S
             self.B = B
 
-            self._type = isinstance(self._images, dict)
-            if self._type:
-                self._keys = list(self._images.keys())
+        self._num_classes = self.num_classes if self.num_classes > 1 else 0
 
-    def __len__(self) -> int:
-        """
-        Built-in Python method that returns the length of the object.
-        :return: Number of images in the dataset.
-        :rtype: int
-        """
-        return len(self._images)
     
     def _loc(self, line: torch.Tensor, rate: int = 5) -> int:
         """
@@ -87,12 +51,12 @@ class YOLOV1Dataset(Dataset):
         :return: Beginning of the box.
         :rtype: int
         """
-        for i in range(self.num_classes, line.shape[0], rate):
+        for i in range(self._num_classes, line.shape[0], rate):
             if line[i] == 0:
                 return int(i/rate)
         return int((i/rate)) + 1
     
-    def __getitem__(self, index: int) -> Union[Tuple[torch.Tensor, int], Tuple[torch.Tensor, torch.Tensor]]:
+    def _specified_getitem(self, bboxes) -> Union[Tuple[torch.Tensor, int], Tuple[torch.Tensor, torch.Tensor]]:
         """
         Built-in Python method that allows to access an element from the object.
 
@@ -100,71 +64,60 @@ class YOLOV1Dataset(Dataset):
         :return: In mode "classification", a tensor and a label. In mode "object_detection, a tuple of tensor of size 2.
         :rtype: Union[Tuple[torch.Tensor, int], Tuple[torch.Tensor, torch.Tensor]]
         """
-        if self._mode == "classification":
-            image = self._images[index]
-            if isinstance(image, np.ndarray):
-                image = Image.fromarray(image)
-            if self._compose is not None:
-                image = self._compose(image)
-            
-            return image, self._labels[index]
+        if self.mode == "classification":
+            return None
         else:
-            if self._type:
-                index = self._keys[index]
+            grid_label = torch.zeros(size=(self.S, self.S, self._num_classes + (5 * self.B)))
+
+            for bbox in bboxes:
+                if self._num_classes > 1:
+                    label = bbox[0]
                 
-            image = self._images[index]
-            if isinstance(image, np.ndarray):
-                image = Image.fromarray(image)
-            if self._compose is not None:
-                image = self._compose(image)
-            
-            grid_label = torch.zeros(size=(self.S, self.S, self.num_classes + (5 * self.B)))
+                box = bbox[1:]
+                x, y, w, h = box
 
-            bboxes = self._bboxes[index]
-            labels = self._labels[index]
-
-            for bbox, label in zip(bboxes, labels):
-                if self._box_format == "xyxy":
-                    x, y, x2, y2 = bbox
-                    w = x2 - x
-                    h = y2 - y
-                elif self._box_format == "xywh":
-                    x, y, w, h = bbox
-                elif self._box_format == "xcycwh":
-                    xc, yc, w, h = bbox
-                    x = xc - (w / 2)
-                    y = yc - (h / 2)
                 i, j = int(y * self.S), int(x * self.S)
 
                 x_cell, y_cell = self.S * x - j, self.S * y - i
                 height_cell, width_cell = (h * self.S, w * self.S)
 
-                pos = torch.nonzero(grid_label[i, j, :self.num_classes])
+                pos = torch.nonzero(grid_label[i, j, :self._num_classes])
                 if pos.nelement() != 0:
                     if pos[0].item() == label:
                         n = self._loc(grid_label[i,j])
-                        if n * 5 + self.num_classes < self.B * 5 + self.num_classes:
+                        if n < self.B:
                             grid_label[i, j, n * 5] = 1
 
                             box_coordinates = torch.tensor([x_cell, y_cell, width_cell, height_cell])
-                            try:
-                                grid_label[i, j, n * 5 + 1:(n+1) * 5] = box_coordinates
-                            except:
-                                break
+                            grid_label[i, j, n * 5 + 1:(n+1) * 5] = box_coordinates
                         else:
                             break
                     else:
                         continue
                 else:
-                    if label is not None:
-                        grid_label[i, j, self.num_classes] = 1
+                    grid_label[i, j, self._num_classes] = 1
 
-                        cell_bbox = torch.tensor([x_cell, y_cell, width_cell, height_cell])
-                        grid_label[i, j, self.num_classes+1:self.num_classes+5] = cell_bbox
+                    cell_bbox = torch.tensor([x_cell, y_cell, width_cell, height_cell])
+                    grid_label[i, j, self._num_classes+1:self._num_classes+5] = cell_bbox
 
-                        if self.num_classes > 1:
-                            grid_label[i, j, label] = 1
+                    if self._num_classes > 1:
+                        grid_label[i, j, int(label)] = 1
                     else:
-                        break
-            
-            return image, grid_label
+                        continue            
+            return grid_label
+
+def collate_fn(batch: Any) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """
+    Specific collate function for Dataset class.
+
+    :param Any **batch**:
+    :return: Apdated Batch.
+    :rtype: Tuple[torch.Tensor, torch.Tensor, torch.Tensor]
+    """
+    images, targets, _batch_bboxes = zip(*batch)
+
+    batch_bboxes = []
+    for i, bboxes in enumerate(_batch_bboxes):
+        for bbox in bboxes:
+            batch_bboxes.append([i] + bbox)
+    return torch.stack(images, dim=0), (torch.stack(targets, dim=0), torch.tensor(batch_bboxes))

@@ -1,86 +1,35 @@
-from PIL import Image
-from torch.utils.data import Dataset
+from ...datasets import Compose, Dataset
+from typing import Any, List, Literal, Tuple, Union
 from .yolo_tools import intersection_over_union_bboxes_prior
-from typing import Callable, Dict, List, Literal, Tuple, Union
 
 import torch
-import numpy as np
-
-class Compose(object):
-    """
-    Compose class.
-    """
-    def __init__(self, transforms: List[Callable]):
-        """
-        Initializes the Compose class.
-        
-        :param List[Callable] **transforms**: Transformations to apply to objects (images)."""
-        self.transforms = transforms
-
-    def __call__(self, image: Union[np.ndarray, Image.Image]):
-        """
-        Built-in Python method that allows to call an instance of the class. Applies the transformations.
-        
-        :param Union[np.ndarray, Image.Image] **image**:
-        :return: Image transformed.
-        :rtype: ArrayLike
-        """
-        for t in self.transforms:
-            image = t(image)
-        return image
 
 class YOLOV3Dataset(Dataset):
     """
     YOLOV3Dataset class.
     """
-    def __init__(self, dataset: Union[Dict[str, List[np.ndarray]], Dict[str, List[int]], Tuple[Dict[str, Dict[str, np.ndarray]], Dict[str, Dict[str, Union[List[int], List[List[int]]]]], Dict[str, Dict[str, Union[int, List[int]]]]]], num_classes: int, S: Union[List[int], Tuple[int]], bboxes_prior: Union[torch.Tensor, None] = None, mode: Literal["classification", "object_detection"] = "object_detection", box_format: Literal["xyxy", "xywh", "xcycwh"] = "xywh", compose: Union[Compose, None] = None):
-        """
-        Initializes the YOLOV3Dataset class.
-
-        :param Union[Dict[str, List[np.ndarray]], Dict[str, List[int]], Tuple[Dict[str, Dict[str, np.ndarray]], Dict[str, Dict[str, Union[List[int], List[List[int]]]]], Dict[str, Dict[str, Union[int, List[int]]]]]] **dataset**: Dataset used.
-        :param int **num_classes**: Number of classes to predict.
-        :param Union[List[int], Tuple[int]] **S**: Cells number along height and width per grid (3 grid).
-        :param torch.Tensor **bboxes_prior**: Bounding boxes prior from dataset.
-        :param Literal["classification", "object_detection"] **mode**: String that defines the model mode. Set to `object_detection`.
-        :param Literal["xyxy", "xywh", "xcycwh"] **box_format**: Format of bounding boxes. Set to `xywh`.
-        :param Union[Compose, None] **compose**: Tool transforming images. Set to `None`.
-        """
+    def __init__(self, dataset_name: str, dataset_path: str, S: Union[List[int], Tuple[int, int, int]], width: int, height: int, transformations: Compose, box_format: Literal["xyxy", "xywh", "xcycwh"] = "xywh", model_normalized: bool = True, type_set: Literal["train", "validation"] = "train", data_aug: bool = False, **kwargs):
         assert len(S) == 3, f"S has to be of length equal to 3, not {len(S)}."
-        assert isinstance(bboxes_prior, torch.Tensor) or bboxes_prior is None, f"bboxes_prior has to be a {torch.Tensor} instance, not {type(bboxes_prior)}."
-        assert isinstance(mode, str) and mode in ["classification", "object_detection"], f"mode has to be a {str} instance and in the given list:\n[\"classification\", \"object_detection\"]"
+        assert isinstance(transformations, Compose), f"transformations has to be a {Compose} instance (or None), not {type(transformations)}."
         assert box_format in ["xyxy", "xywh", "xcycwh"], f'box_format has to be in ["xyxy", "xywh", "xcycwh"], not equal to {box_format}.'
-        assert isinstance(compose, Compose) or compose == None, f"compose has to be a {Compose} instance (or None), not {type(compose)}."
-        super().__init__()
-        self.num_classes = num_classes
-        self._mode = mode
-        self._box_format = box_format
-        self._compose = compose
+        super().__init__(dataset_name, dataset_path, width, height, transformations, box_format, model_normalized, type_set, data_aug, **kwargs)
 
-        if mode == "classification":
-            self._images = dataset["images"]
-            self._labels = dataset["labels"]
+        if self.mode == "classification":
             self.S = None
         else:
-            self._images = dataset["images"]
-            self._bboxes = dataset["bboxes"]
-            self._labels = dataset["labels"]
             self.S = S
-            self._num_bboxes_prior_per_scale = bboxes_prior.shape[1]
-            self._bboxes_prior = bboxes_prior.reshape(9, 2)
 
-            self._type = isinstance(self._images, dict)
-            if self._type:
-                self._keys = list(self._images.keys())
-
-    def __len__(self) -> int:
+    def _set_bboxes_prior(self, bboxes_prior: torch.Tensor) -> None:
         """
-        Built-in Python method that returns the length of the object.
-        :return: Number of images in the dataset.
-        :rtype: int
-        """
-        return len(self._images)        
+        Method that sets bounding boxes prior (anchors).
 
-    def __getitem__(self, index) -> Union[Tuple[torch.Tensor, int], Tuple[torch.Tensor, torch.Tensor]]:
+        :param Tensor **bboxes_prior**: Bouding boxes prior.
+        """
+        self._bboxes_prior = bboxes_prior
+        self._num_bboxes_prior_per_scale = bboxes_prior.shape[1]
+        self._bboxes_prior = bboxes_prior.reshape(9, 2) 
+
+    def _specified_getitem(self, bboxes) -> Union[Tuple[torch.Tensor, int], Tuple[torch.Tensor, torch.Tensor]]:
         """
         Built-in Python method that allows to access an element from the object.
 
@@ -88,68 +37,70 @@ class YOLOV3Dataset(Dataset):
         :return: In mode "classification", a tensor and a label. In mode "object_detection, a tuple of tensor of size 2.
         :rtype: Union[Tuple[torch.Tensor, int], Tuple[torch.Tensor, torch.Tensor]]
         """
-        if self._mode == "classification":
-            image = self._images[index]
-            if isinstance(image, np.ndarray):
-                image = Image.fromarray(image)
-            if self._compose is not None:
-                image = self._compose(image)
-            
-            return image, self._labels[index]
+        if self.mode == "classification":
+            return None
         else:
-            if self._type:
-                index = self._keys[index]
-                
-            image = self._images[index]
-            if isinstance(image, np.ndarray):
-                image = Image.fromarray(image)
-            if self._compose is not None:
-                image = self._compose(image)
-            
             num_elements = 6 if self.num_classes > 1 else 5
             grid_label = [torch.zeros((self._num_bboxes_prior_per_scale, s, s, num_elements), dtype=torch.float32) for s in self.S]
+            for bbox in bboxes:
+                if self.num_classes > 1:
+                    label = bbox[0]
+                
+                box = bbox[1:]
 
-            bboxes = self._bboxes[index]
-            labels = self._labels[index]
+                if self._box_format == "xyxy":
+                    x, y, w, h = box[0], box[1], box[2] - box[0], box[3] - box[1]
+                elif self._box_format == "xywh":
+                    x, y, w, h = box
+                elif self._box_format == "xcycwh":
+                    x, y, w, h = box[0] - (box[2] / 2), box[1] - (box[3] / 2), box[2], box[3]
 
-            if labels != []:
-                for bbox, label in zip(bboxes, labels):
-                    if self._box_format == "xyxy":
-                        x, y, x2, y2 = bbox
-                        w = x2 - x
-                        h = y2 - y
-                    elif self._box_format == "xywh":
-                        x, y, w, h = bbox
-                    elif self._box_format == "xcycwh":
-                        xc, yc, w, h = bbox
-                        x = xc - (w / 2)
-                        y = yc - (h / 2)
+                has_bboxes_prior = [False] * 3
 
-                    has_bboxes_prior = [False] * 3
+                ious_prior = intersection_over_union_bboxes_prior(torch.tensor([w, h]), self._bboxes_prior)
+                ious_prior_indices = ious_prior.argsort(descending=True, dim=0)
 
-                    ious_prior = intersection_over_union_bboxes_prior(torch.tensor([w, h]), self._bboxes_prior)
-                    ious_prior_indices = ious_prior.argsort(descending=True, dim=0)
+                for prior_indice in ious_prior_indices:
+                    scale_indice = prior_indice // self._num_bboxes_prior_per_scale
 
-                    for prior_indice in ious_prior_indices:
-                        scale_indice = prior_indice // self._num_bboxes_prior_per_scale
+                    prior_indice_compared_to_scale = prior_indice % self._num_bboxes_prior_per_scale
 
-                        prior_indice_compared_to_scale = prior_indice % self._num_bboxes_prior_per_scale
+                    s = self.S[scale_indice]
+                    i, j = int(s * y), int(s * x)
 
-                        s = self.S[scale_indice]
-                        i, j = int(s * y), int(s * x)
+                    cell_taken = grid_label[scale_indice][prior_indice_compared_to_scale, i, j, 0]
+                    if not cell_taken and not has_bboxes_prior[scale_indice]:
+                        grid_label[scale_indice][prior_indice_compared_to_scale, i, j, 0] = 1.
 
-                        cell_taken = grid_label[scale_indice][prior_indice_compared_to_scale, i, j, 0]
-                        if not cell_taken and not has_bboxes_prior[scale_indice]:
-                            grid_label[scale_indice][prior_indice_compared_to_scale, i, j, 0] = 1.
+                        x_cell, y_cell = s * x - j, s * y - i
+                        width_cell, height_cell = (w * s, h * s)
 
-                            x_cell, y_cell = s * x - j, s * y - i
-                            width_cell, height_cell = (w * s, h * s)
+                        box_coordinates = torch.tensor([x_cell, y_cell, width_cell, height_cell])
+                        grid_label[scale_indice][prior_indice_compared_to_scale, i, j, 1:5] = box_coordinates
 
-                            box_coordinates = torch.tensor([x_cell, y_cell, width_cell, height_cell])
-                            grid_label[scale_indice][prior_indice_compared_to_scale, i, j, 1:5] = box_coordinates
+                        if self.num_classes > 1:
+                            grid_label[scale_indice][prior_indice_compared_to_scale, i, j, 5] = int(label)
+                        has_bboxes_prior[scale_indice] = True
 
-                            if self.num_classes > 1:
-                                grid_label[scale_indice][prior_indice_compared_to_scale, i, j, 5] = int(label)
-                            has_bboxes_prior[scale_indice] = True
+            return grid_label
+        
+def collate_fn(batch: Any) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """
+    Specific collate function for Dataset class.
 
-            return image, grid_label
+    :param Any **batch**:
+    :return: Apdated Batch.
+    :rtype: Tuple[torch.Tensor, torch.Tensor, torch.Tensor]
+    """
+    images, targets, _batch_bboxes = zip(*batch)
+    targets0, targets1, targets2 = zip(*targets)
+
+    targets0 = torch.stack(targets0, dim=0)
+    targets1 = torch.stack(targets1, dim=0)
+    targets2 = torch.stack(targets2, dim=0)
+
+    batch_bboxes = []
+    for i, bboxes in enumerate(_batch_bboxes):
+        for bbox in bboxes:
+            batch_bboxes.append([i] + bbox)
+    return torch.stack(images, dim=0), ((targets0, targets1, targets2), torch.tensor(batch_bboxes))
