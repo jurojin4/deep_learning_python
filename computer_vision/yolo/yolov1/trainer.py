@@ -118,7 +118,10 @@ class YOLOV1Trainer(Trainer):
         if self._mode == "classification":
             loss = nn.CrossEntropyLoss(weight=torch.tensor(self._weights).to("cuda" if torch.cuda.is_available() else "cpu"))
         else:
-            loss = YOLOV1Loss(self._model.num_classes, self._model.S, self._model.B)
+            if isinstance(self._model, nn.DataParallel):
+                loss = YOLOV1Loss(self._num_classes, self._model.module.S, self._model.module.B)
+            else:
+                loss = YOLOV1Loss(self._num_classes, self._model.S, self._model.B)
         return loss
         
     def _define_optimizer(self):
@@ -144,11 +147,14 @@ class YOLOV1Trainer(Trainer):
     
     def _model_tools(self, predictions: torch.Tensor, ground_truths: torch.Tensor) -> Tuple[List[List[float | int]], List[List[float | int]]]:
         """
-        Method that transforms and reshapes predictions and ground_truths in order to be measure.
+        Method that transforms and reshapes predictions and ground_truths in order to be evaluate.
 
         :param torch.Tensor **predictions**: Model's predictions.
         :param torch.Tensor **ground_truths**: Ground truths.
         :return: Predictions and ground truths sorted according confidence threshold and IoU overlap threshold.
         :rtype: Tuple[List[List[float | int]], List[List[float | int]]]
         """
-        return get_bboxes(predictions=predictions, ground_truths=ground_truths, S=self._model.S, B=self._model.B, num_classes=self._model.num_classes, iou_threshold=self._iou_threshold_overlap, confidence_threshold=self._confidence_threshold)
+        if isinstance(self._model, nn.DataParallel):
+            return get_bboxes(predictions=predictions, ground_truths=ground_truths, S=self._model.module.S, B=self._model.module.B, num_classes=self._num_classes, iou_threshold=self._iou_threshold_overlap, confidence_threshold=self._confidence_threshold)
+        else:
+            return get_bboxes(predictions=predictions, ground_truths=ground_truths, S=self._model.S, B=self._model.B, num_classes=self._num_classes, iou_threshold=self._iou_threshold_overlap, confidence_threshold=self._confidence_threshold)

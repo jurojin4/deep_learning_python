@@ -1,11 +1,21 @@
 # Change Log
 All notable changes to this repository will be documented in this file.
 
+## 2026-05-06 Kaggle corrections
+
+### Fixed
+- When DataParallel is used the model can be accessed by using the attribute 'module'
+
+## 2026-05-06 - Some corrections
+
+### Fixed
+- batch_size not attributed in trainers
+
 ## 2026-04-30 - Embellishment
 
 ### Added
 - Data Augmentation
-- Video Generation
+- Video Generation with YOLO predictions
 - Data Parallelism
 
 ### Fixed

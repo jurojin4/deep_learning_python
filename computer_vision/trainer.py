@@ -606,9 +606,15 @@ class Trainer:
         :param bool **last**: Boolean that characterizes if the checkpoint is from the last epoch. Set to `False`.
         """
         if last:
-            self._model.save(self._save_path, "model_last_epoch")
+            if isinstance(self._model, nn.DataParallel):
+                self._model.module.save(self._save_path, "model_last_epoch")
+            else:
+                self._model.save(self._save_path, "model_last_epoch")
         else:
-            self._model.save(self._save_path, "model_checkpoint")
+            if isinstance(self._model, nn.DataParallel):
+                self._model.module.save(self._save_path, "model_checkpoint")
+            else:
+                self._model.save(self._save_path, "model_checkpoint")
 
         self._logs["checkpoint_epoch"] = epoch
         self._logs["training_time_checkpoint"] = time() - self._start_time
