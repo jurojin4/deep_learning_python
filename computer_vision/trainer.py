@@ -110,8 +110,7 @@ class Trainer:
 
         if torch.cuda.device_count() > 1:
             self._model = nn.DataParallel(self._model)
-        elif torch.cuda.device_count() == 1:
-            self._model.to("cuda" if torch.cuda.is_available() else "cpu")
+        self._model.to("cuda" if torch.cuda.is_available() else "cpu")
         
         print(f"\nModel details:")
         print(f"Using {torch.cuda.device_count()} GPU(s)")
@@ -284,7 +283,7 @@ class Trainer:
                 best_metric = 0
 
         self._start_time = time()
-        for epoch in range(1, self._epochs + 1):
+        for epoch in range(0, self._epochs + 1):
             if not self._no_verbose:
                 lr = self._optimizer.param_groups[0]["lr"]
                 print(f"Epoch: {epoch}/{self._epochs} (Learning rate: {lr})")

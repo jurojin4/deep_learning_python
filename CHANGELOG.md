@@ -1,6 +1,11 @@
 # Change Log
 All notable changes to this repository will be documented in this file.
 
+## 2026-05-06 Kaggle corrections again
+
+### Fixed
+- Forget to add the model to gpu devices after DataParallelism.
+
 ## 2026-05-06 Kaggle corrections
 
 ### Fixed
