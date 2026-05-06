@@ -16,22 +16,26 @@ class YOLOV1Trainer(Trainer):
     """
     Trainer class for YOLOV1 model.
     """
-    def __init__(self, dataset_name, dataset_path, epochs, image_size, batch_size, warmup_epoch = 1, learning_rate = 0.00001, milestones = None, detail = False, no_measure = False, save = False, save_metric = "loss", box_format = "xywh", data_aug = False, delete = False, weights_path = None, load_all = False, experiment_name = None, no_verbose = False):
+    def __init__(self, dataset_name, dataset_path, epochs, image_size, batch_size, iou_threshold_overlap = None, confidence_threshold = None, warmup_epoch = 1, learning_rate = 0.00001, milestones = None, detail = False, no_measure = False, save = False, save_metric = "loss", box_format = "xywh", data_aug = False, delete = False, weights_path = None, load_all = False, experiment_name = None, no_verbose = False):
         assert isinstance(weights_path, str) or weights_path == None, f"weights_path has to be a {str} instance or equals to {None}, not {type(weights_path)}."
-        self._batch_size = batch_size
-        self._train_loader, self._validation_loader = self._define_model_dataloader(dataset_name=dataset_name, dataset_path=dataset_path, image_size=image_size, box_format=box_format, data_aug=data_aug)
-        super().__init__(dataset_name, dataset_path, epochs, image_size, batch_size, warmup_epoch, learning_rate, milestones, detail, no_measure, save, save_metric, box_format, data_aug, delete, weights_path, load_all, experiment_name, no_verbose)
+        self._train_loader, self._validation_loader = self._define_model_dataloader(batch_size, dataset_name=dataset_name, dataset_path=dataset_path, image_size=image_size, box_format=box_format, data_aug=data_aug)
+        super().__init__(dataset_name, dataset_path, epochs, image_size, batch_size, iou_threshold_overlap, confidence_threshold, warmup_epoch, learning_rate, milestones, detail, no_measure, save, save_metric, box_format, data_aug, delete, weights_path, load_all, experiment_name, no_verbose)
 
-    def _define_model_dataloader(self, dataset_name: str, dataset_path: str, image_size: Union[int, Tuple[int, int]], box_format: Literal["xyxy", "xywh", "xcycwh"] = "xywh", data_aug: bool = False):
+    def _define_model_dataloader(self, batch_size: int, dataset_name: str, dataset_path: str, image_size: Union[int, Tuple[int, int]], box_format: Literal["xyxy", "xywh", "xcycwh"] = "xywh", data_aug: bool = False):
         """
         Method that defines the dataloaders for training set and validation set.
-
-        :param Dataset **train**: Training set.
-        :param Dataset **validation**: Validation set.
-
+        
+        :param int **batch_size**: Batch size.
+        :param str **dataset_name**: Name of the dataset.
+        :param str **dataset_path**: Path of the dataset
+        :param Union[int, Tuple[int, int]] **image_size**: Image size.
+        :param Literal["xyxy", "xywh", "xcycwh"] **box_format**: Format of bounding boxes. Set to `xywh`.
+        :param bool **data_aug**: Boolean that allows to use data augmentation on the choosen dataset. Set to `False`.
         :return: DataLoaders for training set and validation set.
         :rtype: Tuple[DataLoader, DataLoader]
         """
+        print(f"Dataset:")
+
         transformations = Compose([transforms.ToTensor()])
 
         trainset = YOLOV1Dataset(dataset_name=dataset_name,
@@ -61,20 +65,20 @@ class YOLOV1Trainer(Trainer):
         
         if self._mode == "classification":
             train_loader = DataLoader(dataset=trainset,
-                                    batch_size=self._batch_size,
+                                    batch_size=batch_size,
                                     shuffle=True,
                                     num_workers=os.cpu_count(),
                                     pin_memory=True,
                                     drop_last=True)            
             validation_loader = DataLoader(dataset=validationset,
-                                    batch_size=self._batch_size,
+                                    batch_size=batch_size,
                                     shuffle=True,
                                     num_workers=os.cpu_count(),
                                     pin_memory=True,
                                     drop_last=True)
         else:
             train_loader = DataLoader(dataset=trainset,
-                                    batch_size=self._batch_size,
+                                    batch_size=batch_size,
                                     shuffle=True,
                                     num_workers=os.cpu_count(),
                                     pin_memory=True,
@@ -82,7 +86,7 @@ class YOLOV1Trainer(Trainer):
                                     collate_fn=collate_fn)
             
             validation_loader = DataLoader(dataset=validationset,
-                                    batch_size=self._batch_size,
+                                    batch_size=batch_size,
                                     shuffle=True,
                                     num_workers=os.cpu_count(),
                                     pin_memory=True,
@@ -104,7 +108,7 @@ class YOLOV1Trainer(Trainer):
             
         return model
 
-    def _define_loss(self):
+    def _define_loss(self) -> Union[nn.CrossEntropyLoss, YOLOV1Loss]:
         """
         Method that defines YOLOV1 loss.
 

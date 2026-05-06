@@ -1,4 +1,5 @@
 from PIL import Image
+from tqdm import tqdm
 from random import randint
 from .data_augmentation import DataAugmentation
 from torch.utils.data import Dataset as dataset
@@ -125,7 +126,7 @@ class Dataset(dataset):
                 limit_images = -1
             return coco2017(dataset_path, type_set, categories_to_keep, limit_images)
         elif dataset_name == "pascalvoc2007":
-            self._base10 = False
+            self._base10 = True
             self._images_selection = True
             return vocdetection(dataset_path, type_set, year="2007")
         elif dataset_name == "pascalvoc2012":
@@ -299,12 +300,12 @@ def collate_fn(batch: Any) -> Any:
     else:
         return images, (torch.stack(targets, dim=0), torch.tensor(batch_bboxes, dtype=torch.float32))
     
-def coco2017(path: str, group: Literal["train", "validation"], categories_to_keep: Union[List[str], None] = None, limit_images: int = -1) -> Tuple[str, Dict[int, List[List[float | int]]], List[float], int, Dict[str, int], Literal["coco2017", "modified_coco2017"], Literal["xywh"], Literal["object_detection"], bool]:
+def coco2017(path: str, type_set: Literal["train", "validation"], categories_to_keep: Union[List[str], None] = None, limit_images: int = -1) -> Tuple[str, Dict[int, List[List[float | int]]], List[float], int, Dict[str, int], Literal["coco2017", "modified_coco2017"], Literal["xywh"], Literal["object_detection"], bool]:
     """
     Method that prepares "coco2017" dataset on a given set (train or validation).
 
     :param str **path**: Directory path that contains the dataset.
-    :param Literal["train", "validation"] **group**: Set to take from the dataset.
+    :param Literal["train", "validation"] **type_set**: Set to take from the dataset.
     :param Union[List[str], None] **categories_to_keep**: Classes to keep for object detection task. Set to `None`.
     :param int **limit_images**: Limit of images to take. Set to `-1`.
     :return: Dataset.
@@ -312,8 +313,8 @@ def coco2017(path: str, group: Literal["train", "validation"], categories_to_kee
     """
     def _load_json(path: str, filename: str):
         with open(os.path.join(path, filename), "rb") as file:
-            stage = json.load(file)
-        return stage
+            type_set = json.load(file)
+        return type_set
     
     def _transform_to_filename(image_id: int):
         image_id = str(image_id)
@@ -324,12 +325,12 @@ def coco2017(path: str, group: Literal["train", "validation"], categories_to_kee
     normalized_categories = {}
     weights = [0] * 80 if categories_to_keep is None else [0] * len(categories_to_keep)
 
-    if group == "validation":
-        group = "val"
+    if type_set == "validation":
+        type_set = "val"
 
-    dataset = _load_json(os.path.join(path, "coco2017/annotations"), f"instances_{group}2017.json")
+    dataset = _load_json(os.path.join(path, "coco2017/annotations"), f"instances_{type_set}2017.json")
 
-    images_path = os.path.join(path, f"coco2017/{group}2017/")
+    images_path = os.path.join(path, f"coco2017/{type_set}2017/")
 
     if categories_to_keep is None:
         categories = dict([(i, category["name"]) for i, category in enumerate(dataset["categories"])])
@@ -354,10 +355,21 @@ def coco2017(path: str, group: Literal["train", "validation"], categories_to_kee
     if limit_images != -1:
         images_per_class = dict([(name, 0) for _, name in categories.items()])
 
+    if len(categories) != 80:
+        if len(categories_to_keep) == 1:
+            if categories_to_keep[0] == "person":
+                dataset_name = "modified_coco2017"
+            else:
+                dataset_name = "modified_coco2017_" + "_".join([category for _, category in categories.items()])        
+        else:
+            dataset_name = "modified_coco2017_" + "_".join([category for _, category in categories.items()])
+    else:
+        dataset_name = "coco2017"
+
     ids = {}
     annotations = {"bboxes": {}, "sizes": {}}
 
-    for annotation in dataset["annotations"]:
+    for annotation in tqdm(dataset["annotations"], leave=True, desc=f"{type_set} {dataset_name}"):
         if annotation["category_id"] in normalized_categories:
             if limit_images != -1:
                 if images_per_class[categories[normalized_categories[annotation["category_id"]]]] >= limit_images:
@@ -377,19 +389,14 @@ def coco2017(path: str, group: Literal["train", "validation"], categories_to_kee
             
     weights = [weight / sum(weights) for weight in weights]
 
-    if len(categories) != 80:
-        dataset_name = "modified_coco2017_" + "_".join([category for _, category in categories.items()])
-    else:
-        dataset_name = "coco2017"
+    return os.path.join(path, f"coco2017/{type_set}2017"), annotations, weights, len(categories), dict([(value, key) for key, value in categories.items()]), dataset_name, "xywh", "object_detection", False
 
-    return os.path.join(path, f"coco2017/{group}2017"), annotations, weights, len(categories), dict([(value, key) for key, value in categories.items()]), dataset_name, "xywh", "object_detection", False
-
-def facedetection(path: str, group: Literal["train", "validation"]) -> Tuple[str, Dict[int, List[List[float | int]]], List[float], int, Dict[str, int], Literal["facedetection"], Literal["xcycwh"], Literal["object_detection"], bool]:
+def facedetection(path: str, type_set: Literal["train", "validation"]) -> Tuple[str, Dict[int, List[List[float | int]]], List[float], int, Dict[str, int], Literal["facedetection"], Literal["xcycwh"], Literal["object_detection"], bool]:
     """
     Method that prepares the "object detection" Face Detection dataset.
 
     :param str **path**: Path where the dataset is stored.
-    :param Literal["train", "validation"] **group**: Set to take from the dataset.
+    :param Literal["train", "validation"] **type_set**: Set to take from the dataset.
     :return: Dataset.
     :rtype: Tuple[str, Dict[int, List[List[float | int]]], List[float], int, Dict[str, int], Literal["facedetection"], Literal["xcycwh"], Literal["object_detection"], bool]
     """
@@ -405,13 +412,12 @@ def facedetection(path: str, group: Literal["train", "validation"]) -> Tuple[str
 
     annotations = {"bboxes": {}, "sizes": {}}
 
-    images_path = os.path.join(path, f"facedetection/images/{group}/")
-    labels_path = os.path.join(path, f"facedetection/labels/{group}/")
+    images_path = os.path.join(path, f"facedetection/images/{type_set}/")
+    labels_path = os.path.join(path, f"facedetection/labels/{type_set}/")
     image_files = sorted(os.listdir(images_path))
-    for image_file in image_files:
+    for image_file in tqdm(image_files, leave=True, desc=f"{type_set} facedetection"):
 
         image_id = image_file.split(".")[0]
-
         size = Image.open(os.path.join(images_path, image_file)).size
 
         with open(os.path.join(labels_path, f"{image_id}.txt"), "r") as file:
@@ -434,23 +440,23 @@ def facedetection(path: str, group: Literal["train", "validation"]) -> Tuple[str
                 annotations["sizes"][image_id] = size
     return images_path, annotations, [1], len(categories), categories, "facedetection", "xcycwh", "object_detection", True
 
-def vocdetection(path: str, group: Literal["train", "validation"] = "train", year: Literal["2007", "2012"] = "2007") -> Tuple[str, Dict[int, List[List[float | int]]], List[float], int, Dict[str, int], Literal["pascalvoc2007", "pascalvoc2012"], Literal["xywh", "xyxy"], Literal["object_detection"], bool]:
+def vocdetection(path: str, type_set: Literal["train", "validation"] = "train", year: Literal["2007", "2012"] = "2007") -> Tuple[str, Dict[int, List[List[float | int]]], List[float], int, Dict[str, int], Literal["pascalvoc2007", "pascalvoc2012"], Literal["xywh", "xyxy"], Literal["object_detection"], bool]:
     """
     Method that prepares the "classification" tiny-imagenet200 dataset.
 
     :param str **path**: Path where the dataset is stored.
-    :param Literal["train", "validation"] **group**: Set to take from the dataset.
+    :param Literal["train", "validation"] **type_set**: Set to take from the dataset.
     :param Literal["2007", "2012"] **year**: Version of the dataset.
     :return: Dataset
     :rtype: Tuple[str, Dict[int, List[List[float | int]]], List[float], int, Dict[str, int], Literal["pascalvoc2007", "pascalvoc2012"], Literal["xywh", "xyxy"], Literal["object_detection"], bool]
     """
     assert year in ["2007", "2012"], f"year has to be in [\"2007\", \"2012\"]."
 
-    if group == "validation":
-        group = "val"
+    if type_set == "validation":
+        type_set = "val"
 
     if year == "2007":
-        with open(os.path.join(path, f"pascalvoc2007/pascal_voc/pascal_{group}2007.json"), "r") as file:
+        with open(os.path.join(path, f"pascalvoc2007/pascal_voc/pascal_{type_set}2007.json"), "r") as file:
             data = json.load(file)
 
         categories = dict([(c["name"], c["id"]) for c in data["categories"]])
@@ -461,7 +467,7 @@ def vocdetection(path: str, group: Literal["train", "validation"] = "train", yea
             return "0" * (6-(len(idx))) + idx + ".jpg"
 
         annotations = {"bboxes": {}, "sizes": {}}
-        for annotation_data in data["annotations"]:
+        for annotation_data in tqdm(data["annotations"], leave=True, desc=f"{type_set} pascalvoc2007"):
             if annotation_data["image_id"] not in annotations.keys():
                 annotations["bboxes"][annotation_data["image_id"]] = [[annotation_data["category_id"]-1] + annotation_data["bbox"]]
                 annotations["sizes"][annotation_data["image_id"]] = Image.open(os.path.join(path, "pascalvoc2007/voctrainval_06-nov-2007/VOCdevkit/VOC2007/JPEGImages/", id_to_filename(annotation_data["image_id"]))).size
@@ -472,7 +478,7 @@ def vocdetection(path: str, group: Literal["train", "validation"] = "train", yea
 
         return os.path.join(path, "pascalvoc2007/voctrainval_06-nov-2007/VOCdevkit/VOC2007/JPEGImages/"), annotations, weights, len(categories), categories, f"pascalvoc{year}", "xywh", "object_detection", False
     else:
-        with open(os.path.join(path, f"pascalvoc2012/ImageSets/Main/{group}.txt"), "r") as file:
+        with open(os.path.join(path, f"pascalvoc2012/ImageSets/Main/{type_set}.txt"), "r") as file:
             data = file.readlines()
 
         data = [file.replace("\n", "") for file in data]
@@ -481,7 +487,7 @@ def vocdetection(path: str, group: Literal["train", "validation"] = "train", yea
         weights = [0] * 20
         annotations = {"bboxes": {}, "sizes": {}}
         
-        for file in os.listdir(os.path.join(path, "pascalvoc2012/Annotations/")):
+        for file in tqdm(os.listdir(os.path.join(path, "pascalvoc2012/Annotations/")), leave=True, desc=f"{type_set} pascalvoc2012"):
             idx = file.split(".")[0]
             if idx in data:
                 tree = ET.parse(os.path.join(path, "pascalvoc2012/Annotations", file))
@@ -501,7 +507,6 @@ def vocdetection(path: str, group: Literal["train", "validation"] = "train", yea
 
                     bbox = [xmin, ymin , xmax, ymax]
 
-                    
                     if idx not in annotations["bboxes"].keys():
                         annotations["bboxes"][idx] = [[categories[label]] + bbox]
                         annotations["sizes"][idx] = size
