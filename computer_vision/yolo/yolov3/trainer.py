@@ -142,7 +142,7 @@ class YOLOV3Trainer(Trainer):
         if self._mode == "classification":
             loss = nn.CrossEntropyLoss(weight=torch.tensor(self._weights).to("cuda" if torch.cuda.is_available() else "cpu"))
         else:
-            loss = YOLOV3Loss(self._model._num_classes)
+            loss = YOLOV3Loss(self._num_classes)
         return loss 
 
     def _define_optimizer(self):
