@@ -16,9 +16,11 @@ def get_args_parser(add_help=True):
     parser.add_argument("--epochs", default=100, type=int, help="number of epochs during training")
     parser.add_argument("--image_size", default=(224, 224), type=parse_tuple, help="Image sizes")
     parser.add_argument("--batch_size", default=32, type=int, help="batch size during training")
+    parser.add_argument("--iou_threshold_overlap", default=None, type=float, help="IoU overlap limit between predicted bounding boxes")
+    parser.add_argument("--confidence_threshold", default=None, type=float, help="Confidence limit to exceed by bounding boxes to be considerated according the model as correct")
     parser.add_argument("--warmup_epoch", default=1, type=int, help="Number of epochs where the model is not measured.")
     parser.add_argument("--learning_rate", default=1e-4, type=float, help="learning rate during training")
-    parser.add_argument("--milestones", default=[45], type=list, help="")
+    parser.add_argument("--milestones", default=[45], type=list, help="Epoch steps where learning rate decreasing lineary by 0.1")
     parser.add_argument("--detail", action="store_true", help="extra details for metrics")
     parser.add_argument("--no_measure", action="store_true", help="No metrics will be measured")
     parser.add_argument("--save", action="store_true", help="save model during training")
@@ -26,8 +28,8 @@ def get_args_parser(add_help=True):
     parser.add_argument("--box_format", default="xywh", type=str, help="format of bounding boxes")
     parser.add_argument("--data_augmentation", action="store_true", help="Data augmentation")
     parser.add_argument("--delete", action="store_true", help="delete dataset if it has been downloaded")
-    parser.add_argument("--weights_path", default=None, type=str, help="")
-    parser.add_argument("--load_all", action="store_true", help="")
+    parser.add_argument("--weights_path", default=None, type=str, help="Path of the weights")
+    parser.add_argument("--load_all", action="store_true", help="Boolean that loads completely are not the model")
     parser.add_argument("--experiment_name", default=None, type=str, help="Name of the experiment")
     parser.add_argument("--no_verbose", action="store_true", help="detailed training on terminal")
     return parser
@@ -39,6 +41,8 @@ if __name__ == "__main__":
                 epochs=args.epochs,
                 image_size=args.image_size,
                 batch_size=args.batch_size,
+                iou_threshold_overlap=args.iou_threshold_overlap,
+                confidence_threshold=args.confidence_threshold,
                 warmup_epoch=args.warmup_epoch,
                 learning_rate=args.learning_rate,
                 milestones=args.milestones,

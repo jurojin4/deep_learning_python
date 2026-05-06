@@ -12,12 +12,19 @@ import random
 import pickle
 import torch.nn as nn
 
-def integer_to_string(integer):
+def integer_to_string(integer: int) -> str:
+    """
+    Method that transforms an integer into a string in order to be more readable.
+    
+    :param int **integer**: Integer.
+    :return: String
+    :rtype: str
+    """
     string = str(integer)
     new_int = ""
     for i in range(1, len(string)+1):
         new_int = string[-i] + new_int
-        if i % 3 == 0:
+        if i % 3 == 0 and i != len(string):
             new_int = " " + new_int
 
     return new_int
@@ -26,17 +33,19 @@ class Trainer:
     """
     Class that train models.
     """
-    def __init__(self, dataset_name: Literal["cifar10", "coco2017", "modified_coco2017", "facedetection", "pascalvoc2007", "pascalvoc2012", "tiny-imagenet200"], dataset_path: str, epochs: int, image_size: int, batch_size: int, warmup_epoch: int = 1, learning_rate: float = 1e-4, milestones: Union[List[int], None] = None, detail: bool = False, no_measure: bool = False, save: bool = False, save_metric: Literal["accuracy", "loss", "mAP", "precision", "recall", "f1_score"] = "loss", box_format: Literal['xyxy', 'xywh', 'xcycwh'] = "xywh", data_aug: bool = False, delete: bool = False, weights_path: Union[str, None] = None, load_all: bool = False, experiment_name: Union[str, None] = None, no_verbose: bool = False):
+    def __init__(self, dataset_name: Literal["cifar10", "coco2017", "modified_coco2017", "facedetection", "pascalvoc2007", "pascalvoc2012", "tiny-imagenet200"], dataset_path: str, epochs: int, image_size: Union[int, Tuple[int, int]], batch_size: int, iou_threshold_overlap: Union[float, None] = None, confidence_threshold: Union[float, None] = None, warmup_epoch: int = 1, learning_rate: Union[float, None] = 1e-4, milestones: Union[List[int], None] = None, detail: bool = False, no_measure: bool = False, save: bool = False, save_metric: Literal["accuracy", "loss", "mAP", "precision", "recall", "f1_score"] = "loss", box_format: Literal['xyxy', 'xywh', 'xcycwh'] = "xywh", data_aug: bool = False, delete: bool = False, weights_path: Union[str, None] = None, load_all: bool = False, experiment_name: Union[str, None] = None, no_verbose: bool = False):
         """
         Initializes the Trainer class.
 
         :param Literal["cifar10", "coco2017", "modified_coco2017", "facedetection", "pascalvoc2007", "pascalvoc2012", "tiny-imagenet200"] **dataset_name**: Name of the dataset.
         :param str **dataset_path**: Path of the dataset, where it will be stored.
         :param int **epochs**: Number of iterations during the training.
-        :param int **image_size**: Image size.
+        :param Union[int, Tuple[int, int]] **image_size**: Image size.
         :param int **batch_size**: Batch size.
+        :param Union[float, None] **iou_threshold_overlap**: IoU threshold between two boxes to determine whether they are overlaid.
+        :param Union[float, None] **confidence_threshold**: Confidence limit to exceed by bounding boxes to be considerated according the model as correct.
         :param int **warmup_epoch**: Number of epochs where model is not measured. Set to `1`.
-        :param float **learning_rate**: Coefficient to apply during gradient descent. Set to `1e-4`.
+        :param Union[float, None] **learning_rate**: Coefficient to apply during gradient descent. Set to `1e-4`.
         :param Union[List[int], None] **milestones**: Integers list of epochs. Set to `None`.
         :param bool **detail**: Boolean that allows to have metrics for each class. Set to `False`.
         :param bool **no_measure**: Boolean that allows to not measure the model. Set to `False`.
@@ -62,17 +71,17 @@ class Trainer:
         assert isinstance(epochs, int), f"epochs has to be an {int} instance, not {type(epochs)}."
         assert isinstance(image_size, int) or isinstance(image_size, tuple), f"image_size has to be an {int} or {tuple} of {int} instance, not {type(image_size)}."
         assert isinstance(batch_size, int) and batch_size > 0, f"batch_size has to be an {int}, not {type(batch_size)}."
+        assert isinstance(iou_threshold_overlap, float) or iou_threshold_overlap is None, f"iou_threshold_overlap has to be a {float} instance or equals to {None}, not {type(iou_threshold_overlap)}."
+        assert isinstance(confidence_threshold, float) or confidence_threshold is None, f"confidence_threshold has to be a {float} instance or equals to {None}, not {type(confidence_threshold)}."
         assert isinstance(warmup_epoch, int) and warmup_epoch >= -1, f"warmup_epoch has to be an {int}, not {type(warmup_epoch)}."
-        assert isinstance(learning_rate, float), f"learning_rate has to be a {float} instance, not {type(learning_rate)}."
+        assert isinstance(learning_rate, float) or learning_rate is None, f"learning_rate has to be a {float} instance or equals to {None}, not {type(learning_rate)}."
         assert isinstance(detail, bool), f"detail has to be a {bool} instance, not {type(detail)}."
         assert isinstance(no_measure, bool), f"measure has to be a {bool} instance, not {type(no_measure)}."
         assert isinstance(save, bool), f"save has to be a {bool} instance, not {type(save)}."
-        assert isinstance(save_metric, str) or save_metric == None, f"save_metric has to be a {str} instance (or None), not {type(save_metric)}."
+        assert isinstance(save_metric, str) or save_metric is None, f"save_metric has to be a {str} instance equals to {None}, not {type(save_metric)}."
         assert box_format in ["xyxy", "xywh", "xcycwh"], f"box_format has to be in [\"xyxy\", \"xywh\", \"xcycwh\"], not {box_format}."
         assert isinstance(no_verbose, bool), f"verbose has to be a {bool} instance, not {type(no_verbose)}."
         super().__init__()
-
-        self._dataset_name = dataset_name
         self._dataset_path = dataset_path
         self._epochs = epochs
         
@@ -82,6 +91,8 @@ class Trainer:
             self._image_size = image_size
 
         self._batch_size = batch_size
+        self._iou_threshold_overlap = iou_threshold_overlap
+        self._confidence_threshold = confidence_threshold
         self._warmup_epoch = warmup_epoch
         self._learning_rate = learning_rate
         self._milestones = milestones
@@ -102,8 +113,17 @@ class Trainer:
         elif torch.cuda.device_count() == 1:
             self._model.to("cuda" if torch.cuda.is_available() else "cpu")
         
+        print(f"\nModel details:")
         print(f"Using {torch.cuda.device_count()} GPU(s)")
         print(f"Model parameters: {integer_to_string(sum([p.numel() for p in self._model.parameters() if p.requires_grad]))}")
+
+        try:
+            self.__getattribute__("_config")
+            self._logs["config"] = self._config["name"]
+            self._logs["config_details"] = self._config
+            print(f"Model has the configuration: {self._config["name"]}")
+        except:
+            print("Model has no configuration.")
 
         self._device_model = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         assert isinstance(self._model, (nn.Module, nn.Sequential)), f"model has to be a {nn.Module} or {nn.Sequential} instance, not {type(self._model)}."
@@ -113,12 +133,6 @@ class Trainer:
         optimizer, scheduler = self._define_optimizer()
         assert isinstance(optimizer, Optimizer), f"optimizer has to be a {Optimizer} instance, not {type(optimizer)}."
 
-        if experiment_name is None:
-            experiment_name = f"{"".join([chr(random.randint(97, 122)) for _ in range(3)])}-{str(random.randint(0, 10000))}"
-
-        if self._save:
-            print(f"Experiment Name: {experiment_name}")
-
         self._optimizer = optimizer
         self._scheduler = scheduler
 
@@ -127,22 +141,35 @@ class Trainer:
         else:
             self._metrics = {}
 
-            boolean = True
-            while boolean:
-                try:
-                    self._iou_threshold_overlap = float(input("IoU threshold between two boxes to determine whether they are overlaid. (between 0. and 1.): "))
-                    assert isinstance(self._iou_threshold_overlap, float) and self._iou_threshold_overlap >= 0. and self._iou_threshold_overlap <= 1., f"IoU threshold (overlap) has to be between 0. and 1., not {self._iou_threshold_overlap}."                    
+            iou_overlap_boolean = True if self._iou_threshold_overlap is None else False
+            confidence_boolean = True if self._confidence_threshold is None else False
 
-                    self._confidence_threshold = float(input("Confidence threshold: "))
-                    assert isinstance(self._confidence_threshold, float) and self._confidence_threshold >= 0. and self._confidence_threshold <= 1., f"Confidence threshold (overlap) has to be between 0. and 1., not {self._confidence_threshold}"
-        
-                    for iou in [i / 100 for i in range(50, 100, 5)]:
-                        mAP = Mean_Average_Precision(num_classes=self._num_classes, iou_threshold=iou, detail=detail, box_format=box_format)
-                        self._metrics[mAP.name] = mAP
-                        boolean = False
+            if not iou_overlap_boolean:
+                print(f"IoU threshold overlap: {self._iou_threshold_overlap}")
+            
+            if not confidence_boolean:
+                print(f"Confidence threshold: {self._confidence_threshold}")
+
+            while iou_overlap_boolean or confidence_boolean:
+                try:
+                    if iou_overlap_boolean:
+                        self._iou_threshold_overlap = float(input("IoU threshold between two boxes to determine whether they are overlaid. (between 0. and 1.): "))
+                        assert isinstance(self._iou_threshold_overlap, float) and self._iou_threshold_overlap >= 0. and self._iou_threshold_overlap <= 1., f"IoU threshold (overlap) has to be between 0. and 1., not {self._iou_threshold_overlap}."                    
+                        iou_overlap_boolean = False
+                    if confidence_boolean:
+                        self._confidence_threshold = float(input("Confidence threshold (between 0. and 1.): "))
+                        assert isinstance(self._confidence_threshold, float) and self._confidence_threshold >= 0. and self._confidence_threshold <= 1., f"Confidence threshold (overlap) has to be between 0. and 1., not {self._confidence_threshold}"
+                        confidence_boolean = False
                 except Exception as e:
                     print(e)
                     continue
+
+            for iou in [i / 100 for i in range(50, 100, 5)]:
+                mAP = Mean_Average_Precision(num_classes=self._num_classes, iou_threshold=iou, detail=detail, box_format=box_format)
+                self._metrics[mAP.name] = mAP
+
+        if experiment_name is None:
+            experiment_name = f"{"".join([chr(random.randint(97, 122)) for _ in range(3)])}-{str(random.randint(0, 10000))}"
 
         self._metrics_to_use = [item for _, item in self._metrics.items()]
 
@@ -186,13 +213,6 @@ class Trainer:
                 self._logs["iou_threshold_overlap"] = self._iou_threshold_overlap
                 self._logs["confidence_threshold"] = self._confidence_threshold
 
-            try:
-                self.__getattribute__("_config")
-                self._logs["config"] = self._config["name"]
-                print(f"Model has the configuration: {self._config["name"]}")
-            except:
-                print("Model has no configuration.")
-
             self._save_pickle(os.path.join(self._save_path, "logs.pickle"), self._logs)
             self._save_pickle(os.path.join(self._save_path, "categories.pickle"), self._categories)
 
@@ -215,6 +235,18 @@ class Trainer:
 
             if self._detail:
                 self._validation_metrics_per_class = {}
+
+
+        print(f"\nRun details:")
+        print(f"Data augmentation: {self._data_aug}")
+        print(f"Epochs: {self._epochs}")
+        print(f"Image size: {self._image_size}")
+        print(f"Batch size: {self._batch_size}")
+        print(f"Warmup epochs: {self._warmup_epoch}")
+    
+        if self._save:
+            print(f"Experiment Name: {experiment_name}")
+            print(f"Save metric: {self._save_metric}")
 
     def _define_model(self):
         raise NotImplementedError(f'Trainer [{type(self).__name__}] is missing the required "_define_model" method.')
@@ -244,6 +276,7 @@ class Trainer:
         :return: Model trained.
         :rtype: Union[nn.Module, nn.Sequential]
         """
+        print("", end="\n")
         if self._save:
             if "loss" in self._save_metric:
                 best_metric = torch.inf
